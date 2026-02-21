@@ -1,0 +1,7 @@
+python-dotenv
+langchain
+# langchain-anthropic
+# langchain-openai
+# langchain-google-genai
+# langchain-ollama
+langchain-deepseek
