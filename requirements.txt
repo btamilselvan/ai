@@ -1,7 +1,10 @@
 python-dotenv
 langchain
+langchain-community
+langgraph
 # langchain-anthropic
 # langchain-openai
 # langchain-google-genai
 # langchain-ollama
 langchain-deepseek
+grandalf

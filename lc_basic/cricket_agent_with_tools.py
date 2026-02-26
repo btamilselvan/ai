@@ -30,12 +30,11 @@ EXTRACTOR_SYSTEM_PROMPT = """You are a helpful assistant that can extract struct
 # 3 - initialize the model
 model = init_chat_model("deepseek-chat", temperature=0.5, max_tokens=2048)
 
-# 3 - create the agent (with a response format that can handle both tool responses and general chat responses)
+# 3 - create the agent
 agent = create_agent(
     model=model,
     tools=[get_upcoming_cricket_matches],
-    system_prompt=SYSTEM_PROMPT,
-    # response_format=CricketToolResponseFormat
+    system_prompt=SYSTEM_PROMPT
 )
 
 # 4 - start the conversation

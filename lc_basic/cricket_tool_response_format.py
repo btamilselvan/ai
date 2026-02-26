@@ -18,23 +18,25 @@ class MatchInfo(BaseModel):
 
 class CricketMatchesResponse(BaseModel):
     """ Schema for the response from the get_upcoming_cricket_matches tool."""
-    type: Literal["match_list"] = "match_list"
+    type: Literal["match_list"] = Field(
+        description="Indicates that this is a response containing a list of matches", default="match_list")
     matches: list[MatchInfo] = Field(
         description="List of upcoming cricket matches")
     has_matches: bool = Field(
         description="Indicates if there are upcoming matches")
-    agent_summary: str = Field(description="A brief summary of the response to provide context to the user")
+    agent_summary: str = Field(
+        description="A brief summary of the response to provide context to the user")
 
 
 class GeneralChatResponse(BaseModel):
     """ Schema for general agent responses that are not tool responses."""
-    type: Literal["chat"] = "chat"
+    type: Literal["chat"] = Field(description="Indicates that this is a general chat response", default="chat")
     content: str = Field(description="The content of the agent's response")
 
 
 class AgentErrorResponse(BaseModel):
     """ Schema for error responses from the agent."""
-    type: Literal["error"] = "error"
+    type: Literal["error"] = Field(description="Indicates that this is an error response", default="error")
     error_message: str = Field(
         description="Error message describing what went wrong")
 

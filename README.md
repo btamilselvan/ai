@@ -20,6 +20,82 @@
 | Control            | Modular                                             | Total Control (Architectural)                         | "Hands-off" (Managerial)                                   |
 | Best Analogy       | A Swiss Army Knife: A tool for every specific task. | A Flowchart: If A happens, do B; then repeat C.       | A Company: Different roles working toward a goal.          |
 
+## Tools
+
+Tools are callable functions with well-defined inputs and outputs that get passed to a chat model. The model decides when to invoke a tool based on the conversation context, and what input arguments to provide.
+
+### Access Context
+Tools can access runtime information through the ToolRuntime parameter.
+
+#### ToolRuntime Componenets
+| Component     | Description                                                                                                   | Use case                                            |
+|---------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------|
+| State         | Short-term memory - mutable data that exists for the current conversation (messages, counters, custom fields) | Access conversation history, track tool call counts |
+| Context       | Immutable configuration passed at invocation time (user IDs, session info)                                    | Personalize responses based on user identity        |
+| Store         | Long-term memory - persistent data that survives across conversations                                         | Save user preferences, maintain knowledge base      |
+| Stream Writer | Emit real-time updates during tool execution                                                                  | Show progress for long-running operations           |
+| Config        | RunnableConfig for the execution                                                                              | Access callbacks, tags, and metadata                |
+| Tool Call ID  | Unique identifier for the current tool invocation                                                             | Correlate tool calls for logs and model invocations |
+
+
+## LangGraph
+
+LangGraph is very low-level, and focused entirely on ```agent orchestration```. LangGraph provides low-level supporting infrastructure for any long-running, ```stateful``` workflow or agent.
+
+### ReAct
+The ReAct pattern (short for Reasoning + Acting) is the architectural standard for building AI agents that don't just talk, but actually do work.
+
+Before ReAct, LLMs were like students who shouted out an answer immediately without showing their work. ReAct forces the AI to slow down and use a "Thought-Action-Observation" loop.
+
+#### Three stpes of ReAct
+When we give a ReAct agent a task (like "What is the square root of the current temperature in NYC?"), it follows this cycle:
+
+- Thought - The AI writes down its internal reasoning. "I first need to find the temperature in NYC, then I will calculate the square root."
+- Action - The AI chooses a tool to call. get_weather(city="NYC")
+- Observation - The AI "sees" the tool result. "The temperature is 16 degrees."
+
+#### Why ReAct better
+- Reduced Hallucination: Instead of guessing a fact (like the weather), the agent is forced to use a tool to get the ground truth.
+- Multi-step Logic: It can break a complex request into a sequence of smaller tasks.
+- Self-Correction: If a tool returns an error (e.g., "City not found"), the AI can "Reason" about the error and try a different search term.
+
+#### How ReAct fits in LangGrapgh
+- ```llm_call``` node: This is where the Thought and Action happen. The LLM generates the "Thought" (internal monologue) and the "Tool Call" (Action).
+- ```tool_node```: This provides the Observation. It runs the math and feeds the result back into the message history.
+- ```should_continue```: This is the "Exit Logic." It looks at the LLM's last message and asks: "Is there an 'Action' here? If yes, go to the Tool Node. If no, we are done."
+
+### Graph API
+- Graph - workflow made of nodes and edges (graphical representation)
+- Nodes - steps (it can be a function, an agent or a tool)
+- Edges - rules that decide which node runs next
+- State - shared data between the nodes (e.g. storing user's favorite cricket team, messages, etc) (nodes receive the current state and returns the updated state) (TypeDict)
+
+### Workflow
+
+Define a state -> Write node functions -> connect nodes with edges -> fianl graph (invoke the grpah)
+
+### Thinking in LangGraph
+Step 1: Map out your workflow as discrete steps
+Step 2: Identify what each step needs to do
+    - A step can be, LLM Step, Data Step, Action Step, User Input Step
+Step 3: Design your state
+    - Keep state raw, format prompts on-demand
+Step 4: Build your nodes
+
+### Error handling
+| Error Type                                                      | Who Fixes It       | Strategy                           | When to Use                                       |
+|-----------------------------------------------------------------|--------------------|------------------------------------|---------------------------------------------------|
+| Transient errors (network issues, rate limits)                  | System (automatic) | Retry policy                       | Temporary failures that usually resolve on retry  |
+| LLM-recoverable errors (tool failures, parsing issues)          | LLM                | Store error in state and loop back | LLM can see the error and adjust its approach     |
+| User-fixable errors (missing information, unclear instructions) | Human              | Pause with interrupt()             | Need user input to proceed                        |
+| Unexpected errors                                               | Developer          | Let them bubble up                 | Unknown issues that need debugging                |
+
+
+### Functional API
+
+### Memory Overview
+### Short-term memory
+
 
 ## Workspace setup
 - create venv ```python3 -m venv myaienv```
@@ -37,3 +113,4 @@
 ## References
 - chatgpt model comparision - https://developers.openai.com/api/docs/models/compare
 - ollama langchain integration - https://docs.langchain.com/oss/python/integrations/chat/ollama
+- Providers list - https://docs.langchain.com/oss/python/integrations/providers/overview
