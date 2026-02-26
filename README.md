@@ -90,6 +90,20 @@ Step 4: Build your nodes
 | User-fixable errors (missing information, unclear instructions) | Human              | Pause with interrupt()             | Need user input to proceed                        |
 | Unexpected errors                                               | Developer          | Let them bubble up                 | Unknown issues that need debugging                |
 
+### Interrupt and Resuming
+
+When you call interrupt, here’s what happens:
+Graph execution gets suspended at the exact point where interrupt is called
+State is saved using the checkpointer so execution can be resumed later, In production, this should be a persistent checkpointer (e.g. backed by a database)
+Value is returned to the caller under __interrupt__; it can be any JSON-serializable value (string, object, array, etc.)
+Graph waits indefinitely until you resume execution with a response
+Response is passed back into the node when you resume, becoming the return value of the interrupt() call
+
+Key points about resuming:
+You must use the same thread ID when resuming that was used when the interrupt occurred
+The value passed to Command(resume=...) becomes the return value of the interrupt call
+The node restarts from the beginning of the node where the interrupt was called when resumed, so any code before the interrupt runs again
+You can pass any JSON-serializable value as the resume value
 
 ### Functional API
 
