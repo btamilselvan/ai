@@ -12,13 +12,16 @@
 # The llm_node will generate a response based on the tool result and the user query.
 # Then again the control will be routed to the planner node. and the planner node will return END since there are no more tools to make.
 import os
-import operator, random
+import operator, random, asyncio
 from typing import Optional, List, Literal, Annotated
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain.messages import HumanMessage, AnyMessage, AIMessage, SystemMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import ConnectionPool, AsyncConnectionPool
 from langgraph.types import RetryPolicy, Command, interrupt
 from typing_extensions import TypedDict
 from cricket_tools import get_player_stats, get_preferred_team, get_team_rankings, get_upcoming_matches
@@ -63,7 +66,15 @@ class MyAppState(TypedDict):
     llm_calls: int
     tool_calls: int
 
+def setup_checkpointer() -> PostgresSaver:
+    DATABASE_URL = os.getenv("DATABASE_URL")
+    pool = ConnectionPool(conninfo=DATABASE_URL, max_size=10)
+    checkpointer = PostgresSaver(pool)
+    checkpointer.setup()
+    return checkpointer
+
 # 5 - define nodes
+
 # 5.1 - LLM node
 def llm_node(state: MyAppState):
     """ Call LLM with the current messages and update the state with the response. """
@@ -72,7 +83,7 @@ def llm_node(state: MyAppState):
     
     preferred_team = state.get("preferred_team", None)
     print(f"User's preferred team: {preferred_team}\n")
-
+    
     # Check if preferred_team is present in the state
     if not state.get("preferred_team"):
         print("No preferred team found. Requesting from user...\n")
@@ -157,7 +168,7 @@ def planner_node(state: MyAppState) -> Literal["tool", "END"]:
     else:
         return "END"
 
-def handle_interrupt(chat_state: MyAppState) -> MyAppState:
+async def handle_interrupt(chat_state: MyAppState) -> MyAppState:
     """ Handle interrupt by asking user for input and resuming execution. """
     
     # Check if we hit an interrupt
@@ -179,13 +190,14 @@ def handle_interrupt(chat_state: MyAppState) -> MyAppState:
         
         while(True):
             # Get user input
-            user_response = input(prompt)
+            # user_response = input(prompt)
+            user_response = await asyncio.to_thread(input, prompt)
             if(len(user_response.strip()) > 0):
                 break
         
         resume_map[interrupt.id] = user_response
     
-    chat_state = agent.invoke(Command(resume=resume_map), config=config)
+    chat_state = await agent.ainvoke(Command(resume=resume_map), config=config)
     
     # interrupt_value = chat_state['__interrupt__'][0].value
     # # Get the prompt message (with fallback)
@@ -218,44 +230,57 @@ graph.add_edge("tool", "llm")
 
 # 7 - compile the agent
 config = {"configurable": {"thread_id": session_id}}
+print(f"Current Session ID: {session_id}")
 
-checkpointer = InMemorySaver()
-agent = graph.compile(checkpointer=checkpointer)
+async def init_checkpointer():
+    # global checkpointer
+    global agent
+    DATABASE_URL = os.getenv("DATABASE_URL")
+    
+    async with AsyncConnectionPool(conninfo=DATABASE_URL, max_size=10, kwargs={"autocommit": True, "prepare_threshold": 0}) as pool:
+        checkpointer = AsyncPostgresSaver(pool)
+        
+        #wait for checkpointer setup
+        await checkpointer.setup()
+        
+        print("Checkpointer initialized")
+        
+        agent = graph.compile(checkpointer=checkpointer)
+        
+        print(agent.get_graph().draw_ascii())
+        
+        # 8 - invoke the agent with an initial message
+        # chat_state: MyAppState = {"messages": [HumanMessage(content="Can you introduce yourself?")], "llm_calls": 0, "preferred_team": None}
+        
+        initial_input = {"messages": [HumanMessage(content="Can you introduce yourself?")]}
+        # First invocation - will hit the interrupt
+        chat_state = await agent.ainvoke(initial_input, config=config)
+        
+        # # Check if we hit an interrupt
+        chat_state = await handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
+        
+        print(f"Agent: {chat_state['messages'][-1].content}")
+        # print("\n")
 
-print(agent.get_graph().draw_ascii())
+        # # 9 - continue the conversation with user input
+        number_of_queries = 1
+        for _ in range(number_of_queries):
+            user_input = await asyncio.to_thread(input, "You: ")
+            # chat_state["messages"].append(HumanMessage(content=user_input))
+            user_message = {"messages": [HumanMessage(content=user_input)]}
+            chat_state = await agent.ainvoke(user_message, config=config)
+            # chat_state = await handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
 
-# 8 - invoke the agent with an initial message
-chat_state: MyAppState = {"messages": [HumanMessage(content="Can you introduce yourself?")], "llm_calls": 0, "preferred_team": None}
-# First invocation - will hit the interrupt
-chat_state = agent.invoke(chat_state, config=config)
+            # print(chat_state)
+            print(f"Agent: {chat_state['messages'][-1].content}")
+            # print("\n")
+            # print(f"LLM calls so far: {chat_state['llm_calls']}")
 
-# Check if we hit an interrupt
-chat_state = handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
+        print(f"total messages count {len(chat_state.get('messages', []))}")
+        print(f"total llm calls count {chat_state.get('llm_calls', 0)}")
+        print(f"total tool calls count {chat_state.get('tool_calls', 0)}")
+        
 
-# if chat_state.get("__interrupt__"):
-#     print(f"Interrupt: {chat_state['__interrupt__'][0].value}\n")
-#     user_team = input("Your preferred team: ")
-#     # Resume with the user's input
-#     chat_state = agent.invoke(Command(resume=user_team), config=config)
-
-print(f"Agent: {chat_state['messages'][-1].content}")
-print("\n")
-
-# 9 - continue the conversation with user input
-number_of_queries = 1
-for i in range(number_of_queries):
-    user_input = input("You: ")
-    user_message = {"messages": [HumanMessage(content=user_input)]}
-    chat_state = agent.invoke(user_message, config=config)
-    chat_state = handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
-
-    # print(chat_state)
-    print(f"Agent: {chat_state['messages'][-1].content}")
-    # print("\n")
-    # print(f"LLM calls so far: {chat_state['llm_calls']}")
-
-print(f"total messages count {len(chat_state.get('messages', []))}")
-print(f"total llm calls count {chat_state.get('llm_calls', 0)}")
-print(f"total tool calls count {chat_state.get('tool_calls', 0)}")
-
-# memory.
+if __name__ == "__main__":
+    print("init checkpointer")
+    asyncio.run(init_checkpointer())

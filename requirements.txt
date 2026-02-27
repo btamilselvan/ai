@@ -7,4 +7,11 @@ langgraph
 # langchain-google-genai
 # langchain-ollama
 langchain-deepseek
+
+#grandlaf is to draw the graph workflow
 grandalf
+
+psycopg[binary,pool]
+langgraph-checkpoint-postgres
+
+# langgraph-checkpoint-redis

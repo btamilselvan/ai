@@ -105,6 +105,12 @@ The value passed to Command(resume=...) becomes the return value of the interrup
 The node restarts from the beginning of the node where the interrupt was called when resumed, so any code before the interrupt runs again
 You can pass any JSON-serializable value as the resume value
 
+#### Interrupts - best practices
+- Do not enclose interrupt calls in try catch block
+- Do not perform non-idempotent operations before interrupt
+- Do not return complex values in interrupt calls
+- Do not conditionally skip interrupt calls within a node
+
 ### Functional API
 
 ### Memory Overview
