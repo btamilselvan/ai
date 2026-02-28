@@ -1,0 +1,8 @@
+{
+    "dependencies": ["./"],
+    "env": "./.env",
+    "python_version": "3.12",
+    "graphs": {
+        "cricket_agent": "./cricket_agent/agent.py:agent"
+    }
+}

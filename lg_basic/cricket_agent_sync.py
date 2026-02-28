@@ -24,7 +24,11 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import ConnectionPool, AsyncConnectionPool
 from langgraph.types import RetryPolicy, Command, interrupt
 from typing_extensions import TypedDict
-from cricket_tools import get_player_stats, get_preferred_team, get_team_rankings, get_upcoming_matches
+from cricket_tools import get_player_stats, get_preferred_team, get_team_rankings, get_upcoming_matches, get_cricket_tools_remote
+from langchain_mcp_adapters.tools import load_mcp_tools
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from langgraph.prebuilt import ToolNode, tools_condition
 
 # create a session id for the conversation
 session_id = f"session-{random.randint(1000, 9999)}"
@@ -43,6 +47,9 @@ Always be polite and informative in your responses.
 Tailor your responses to the user's preferred team if mentioned in the conversation.
 """
 
+config = {"configurable": {"thread_id": session_id}}
+print(f"Current Session ID: {session_id}")
+
 # 3 - define the model
 # model = init_chat_model("ollama:llama3.2", temperature=0, max_tokens=2048)
 model = init_chat_model("deepseek-chat", temperature=0, max_tokens=2048)
@@ -54,7 +61,7 @@ tools = [get_upcoming_matches, get_team_rankings, get_player_stats, get_preferre
 tool_by_name = {tool.name.lower(): tool for tool in tools}
 
 # bind tools to the model
-model_with_tools = model.bind_tools(tools)
+# model_with_tools = model.bind_tools(tools)
 
 # 4 - define app state
 class MyAppState(TypedDict):
@@ -79,7 +86,7 @@ def setup_checkpointer() -> PostgresSaver:
 def llm_node(state: MyAppState):
     """ Call LLM with the current messages and update the state with the response. """
     
-    print("execute LLM Node \n")
+    print(f"execute LLM Node. Total messages count {len(state.get("messages", []))}")
     
     preferred_team = state.get("preferred_team", None)
     print(f"User's preferred team: {preferred_team}\n")
@@ -98,6 +105,7 @@ def llm_node(state: MyAppState):
     llm_calls = state.get("llm_calls", 0) + 1
     messages = state.get("messages", []).copy()
     
+    
     # Call the model with the system prompt and the current messages
     response = model_with_tools.invoke([SystemMessage(content=SYSTEM_PROMPT)] + messages)
     
@@ -107,7 +115,168 @@ def llm_node(state: MyAppState):
     # return Command(update={"messages": [response], "llm_calls": llm_calls})
     return MyAppState(messages=[response], llm_calls=llm_calls, preferred_team=preferred_team)
 
+async def runit():
+    server_params = StdioServerParameters(
+        command="npx",
+        args=[
+            "mcp-remote",
+            "https://mcp.rapidapi.com",
+            "--header",
+            "x-api-host: cricbuzz-cricket.p.rapidapi.com",
+            "--header",
+            f"x-api-key: {os.getenv("RAPIDAPI_API_KEY")}",
+        ]
+    )
+    
+    async with stdio_client(server_params) as (read, write):
+        global agent
+        global model_with_tools
+        global tool_node_remote
+        
+        DATABASE_URL = os.getenv("DATABASE_URL")
+        
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            mcp_tools = await load_mcp_tools(session)
+            print("mcp tools loaded..")
+            
+            tool_node_remote = ToolNode(mcp_tools)
+            model_with_tools = model.bind_tools(mcp_tools)
+            
+            async with AsyncConnectionPool(conninfo=DATABASE_URL, max_size=10, kwargs={"autocommit": True, "prepare_threshold": 0}) as pool:
+                
+                checkpointer = AsyncPostgresSaver(pool)
+                #wait for checkpointer setup
+                await checkpointer.setup()
+                print("Checkpointer initialized")
+                
+                graph = StateGraph(MyAppState)
+                graph.add_node("llm", llm_node)
+                # graph.add_node("tool", tool_tode, retry_policy=RetryPolicy(max_attempts=3, initial_interval=1.0))
+                # graph.add_node("tools", tool_node_remote, retry_policy=RetryPolicy(max_attempts=3, initial_interval=1.0))
+                graph.add_node("tools", remote_tool_node_wrapper, retry_policy=RetryPolicy(max_attempts=3, initial_interval=1.0))
+                # graph.add_node("planner", planner_node)
+
+                ## entry point
+                graph.add_edge(START, "llm")
+                # graph.add_conditional_edges("llm", planner_node, {"tool": "tools", "END": END})
+                graph.add_conditional_edges("llm", tools_condition)
+                graph.add_edge("tools", "llm")
+
+                # 7 - compile the agent
+                
+                agent = graph.compile(checkpointer=checkpointer)
+                
+                print(agent.get_graph().draw_ascii())
+                
+                initial_input = {"messages": [HumanMessage(content="Can you introduce yourself?")]}
+                # First invocation - will hit the interrupt
+                chat_state = await agent.ainvoke(initial_input, config=config)
+                
+                # # Check if we hit an interrupt
+                chat_state = await handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
+                
+                print(f"Agent: {chat_state['messages'][-1].content}")
+                # print("\n")
+
+                # # 9 - continue the conversation with user input
+                number_of_queries = 2
+                for _ in range(number_of_queries):
+                    user_input = await asyncio.to_thread(input, "You: ")
+                    # chat_state["messages"].append(HumanMessage(content=user_input))
+                    user_message = {"messages": [HumanMessage(content=user_input)]}
+                    chat_state = await agent.ainvoke(user_message, config=config)
+                    # chat_state = await handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
+
+                    # print(chat_state)
+                    print(f"Agent: {chat_state['messages'][-1].content}")
+                    # print("\n")
+                    # print(f"LLM calls so far: {chat_state['llm_calls']}")
+                
+                print(f"total messages count {len(chat_state.get('messages', []))}")
+                print(f"total llm calls count {chat_state.get('llm_calls', 0)}")
+                print(f"total tool calls count {chat_state.get('tool_calls', 0)}")
+
+
 # 5.2 - tool node
+# async def init_checkpointer():
+#     # global checkpointer
+#     global agent
+#     global tool_node_remote
+#     global model_with_tools
+#     DATABASE_URL = os.getenv("DATABASE_URL")
+    
+#     async with AsyncConnectionPool(conninfo=DATABASE_URL, max_size=10, kwargs={"autocommit": True, "prepare_threshold": 0}) as pool:
+#         checkpointer = AsyncPostgresSaver(pool)
+        
+#         #wait for checkpointer setup
+#         await checkpointer.setup()
+#         print("Checkpointer initialized")
+        
+#         cricket_tools = await get_cricket_tools_remote()
+#         tool_node_remote = ToolNode(cricket_tools)
+#         model_with_tools = model.bind_tools(cricket_tools)
+        
+#         print("mcp tools loaded..")
+        
+#         # 6 - build the agent graph
+#         graph = StateGraph(MyAppState)
+#         graph.add_node("llm", llm_node)
+#         # graph.add_node("tool", tool_tode, retry_policy=RetryPolicy(max_attempts=3, initial_interval=1.0))
+#         graph.add_node("tool", tool_node_remote, retry_policy=RetryPolicy(max_attempts=3, initial_interval=1.0))
+#         graph.add_node("planner", planner_node)
+
+#         ## entry point
+#         graph.add_edge(START, "llm")
+#         graph.add_conditional_edges("llm", planner_node, {"tool": "tool", "END": END})
+#         graph.add_edge("tool", "llm")
+
+#         # 7 - compile the agent
+        
+#         agent = graph.compile(checkpointer=checkpointer)
+        
+#         print(agent.get_graph().draw_ascii())
+        
+#         # 8 - invoke the agent with an initial message
+#         # chat_state: MyAppState = {"messages": [HumanMessage(content="Can you introduce yourself?")], "llm_calls": 0, "preferred_team": None}
+        
+#         initial_input = {"messages": [HumanMessage(content="Can you introduce yourself?")]}
+#         # First invocation - will hit the interrupt
+#         chat_state = await agent.ainvoke(initial_input, config=config)
+        
+#         # # Check if we hit an interrupt
+#         chat_state = await handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
+        
+#         print(f"Agent: {chat_state['messages'][-1].content}")
+#         # print("\n")
+
+#         # # 9 - continue the conversation with user input
+#         number_of_queries = 1
+#         for _ in range(number_of_queries):
+#             user_input = await asyncio.to_thread(input, "You: ")
+#             # chat_state["messages"].append(HumanMessage(content=user_input))
+#             user_message = {"messages": [HumanMessage(content=user_input)]}
+#             chat_state = await agent.ainvoke(user_message, config=config)
+#             # chat_state = await handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
+
+#             # print(chat_state)
+#             print(f"Agent: {chat_state['messages'][-1].content}")
+#             # print("\n")
+#             # print(f"LLM calls so far: {chat_state['llm_calls']}")
+
+#         print(f"total messages count {len(chat_state.get('messages', []))}")
+#         print(f"total llm calls count {chat_state.get('llm_calls', 0)}")
+#         print(f"total tool calls count {chat_state.get('tool_calls', 0)}")
+
+# Wrapper for the remote tool node to make it compatible with the graph - intercept the tool calls
+async def remote_tool_node_wrapper(state: MyAppState):
+    print("execute Remote Tools Node \n")
+    
+    result = await tool_node_remote.ainvoke(state)
+    
+    print(f"Remote tool node result: {result}")
+    return result
+
 # Always return the control to llm node
 def tool_tode(state: MyAppState) -> Command[Literal["llm"]]:
     """ Execute tools based on the AI message containing tool calls. """
@@ -153,7 +322,7 @@ def tool_tode(state: MyAppState) -> Command[Literal["llm"]]:
     #return the new messages. this will be appended to the existing list of messages.
     return {"messages": tool_result, "tool_calls": tool_calls}
 
-# 5.3 - conditional edge (decide whether to call the tool or not)
+# 5.3 - conditional edge (decide whether to call the tool or not) (the prebuilt tools_condition does exactly the same thing that this planner node do)
 def planner_node(state: MyAppState) -> Literal["tool", "END"]:
     """ Decide whether to call the tool or not. """
     
@@ -161,6 +330,8 @@ def planner_node(state: MyAppState) -> Literal["tool", "END"]:
     
     messages = state.get("messages", [])
     last_message = messages[-1] if messages else None
+    
+    print(f"Last message: {last_message}")
     
     #if there are no tool calls required, end the conversation. the last_message (llm message will have a tool_calls attribute)
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
@@ -217,70 +388,8 @@ async def handle_interrupt(chat_state: MyAppState) -> MyAppState:
     
     return chat_state
 
-# 6 - build the agent graph
-graph = StateGraph(MyAppState)
-graph.add_node("llm", llm_node)
-graph.add_node("tool", tool_tode, retry_policy=RetryPolicy(max_attempts=3, initial_interval=1.0))
-graph.add_node("planner", planner_node)
-
-## entry point
-graph.add_edge(START, "llm")
-graph.add_conditional_edges("llm", planner_node, {"tool": "tool", "END": END})
-graph.add_edge("tool", "llm")
-
-# 7 - compile the agent
-config = {"configurable": {"thread_id": session_id}}
-print(f"Current Session ID: {session_id}")
-
-async def init_checkpointer():
-    # global checkpointer
-    global agent
-    DATABASE_URL = os.getenv("DATABASE_URL")
-    
-    async with AsyncConnectionPool(conninfo=DATABASE_URL, max_size=10, kwargs={"autocommit": True, "prepare_threshold": 0}) as pool:
-        checkpointer = AsyncPostgresSaver(pool)
-        
-        #wait for checkpointer setup
-        await checkpointer.setup()
-        
-        print("Checkpointer initialized")
-        
-        agent = graph.compile(checkpointer=checkpointer)
-        
-        print(agent.get_graph().draw_ascii())
-        
-        # 8 - invoke the agent with an initial message
-        # chat_state: MyAppState = {"messages": [HumanMessage(content="Can you introduce yourself?")], "llm_calls": 0, "preferred_team": None}
-        
-        initial_input = {"messages": [HumanMessage(content="Can you introduce yourself?")]}
-        # First invocation - will hit the interrupt
-        chat_state = await agent.ainvoke(initial_input, config=config)
-        
-        # # Check if we hit an interrupt
-        chat_state = await handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
-        
-        print(f"Agent: {chat_state['messages'][-1].content}")
-        # print("\n")
-
-        # # 9 - continue the conversation with user input
-        number_of_queries = 1
-        for _ in range(number_of_queries):
-            user_input = await asyncio.to_thread(input, "You: ")
-            # chat_state["messages"].append(HumanMessage(content=user_input))
-            user_message = {"messages": [HumanMessage(content=user_input)]}
-            chat_state = await agent.ainvoke(user_message, config=config)
-            # chat_state = await handle_interrupt(chat_state)  # Handles if interrupt exists, otherwise returns as-is
-
-            # print(chat_state)
-            print(f"Agent: {chat_state['messages'][-1].content}")
-            # print("\n")
-            # print(f"LLM calls so far: {chat_state['llm_calls']}")
-
-        print(f"total messages count {len(chat_state.get('messages', []))}")
-        print(f"total llm calls count {chat_state.get('llm_calls', 0)}")
-        print(f"total tool calls count {chat_state.get('tool_calls', 0)}")
-        
-
 if __name__ == "__main__":
     print("init checkpointer")
-    asyncio.run(init_checkpointer())
+    # asyncio.run(init_checkpointer())
+    asyncio.run(runit())
+

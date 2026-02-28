@@ -115,7 +115,16 @@ You can pass any JSON-serializable value as the resume value
 
 ### Memory Overview
 ### Short-term memory
+Short-term memory (thread-level persistence) enables agents to track multi-turn conversations.
+- Use ```checkpoint``` to add short-term memory. it is backed by InMemorySaver, PostgresSaver, MongoDBSaver, RedisSaver
 
+- Short-term memory can be managed by "Trim Messages", "Delete Messages", "Summarize Messages"
+
+### Long-term memory
+Use long-term memory to store user-specific or application-specific data across conversations.
+- Can be implemented using "InMemoryStore", "PostgresStore", "RedisStore"
+
+### Subgraphs
 
 ## Workspace setup
 - create venv ```python3 -m venv myaienv```
@@ -129,6 +138,194 @@ You can pass any JSON-serializable value as the resume value
 
 - Run locally (install ollama and download the model(s))
 
+## LangSmith App
+### Local dev
+- Install langgraph-cli and "langgraph-cli[inmem]"
+- pip install langgraph-cli "langgraph-cli[inmem]"
+- Run, ```langgraph dev```
+- When you import functions from one module to another (e.g. agent.py imports tools and nodes), make sure to use the full module path in the import statement. For example, 
+
+``` cricket_agent/agent.py -> import functions from utils/nodes.py and utils/tools.py
+    from cricket_agent.utils.state import MyAppState
+    from cricket_agent.utils.nodes import llm_node, tool_tode, planner_node
+```
+
+## MCP (Model Context Protocol)
+
+The MCP Server (the wrapper) acts as a specialized adapter. It is often developed by the community or the API providers themselves to bridge the gap between "LLM-speak" (JSON-RPC) and "API-speak" (REST/HTTP).
+
+- In the MCP world, "Server" refers to the role in the JSON-RPC relationship, not necessarily where the code lives.
+
+### The Wrapper's Role
+
+Whether local or remote, the MCP wrapper is the piece that "knows" the API. It contains the logic to:
+
+- ```Authenticate``` with the underlying APIs
+
+- ```Map Tools``` - e.g. Take a high-level tool like get_upcoming_matches and translate it into the specific URL https://cricket-live-data.p.rapidapi.com/fixtures.
+
+- ```Format Data``` - e.g Strip out the 1,000 lines of raw JSON the API returns and give the LLM just the 5 lines of cricket scores it actually asked for.
+
+### Who Develops the Wrapper
+This is currently a mix of three groups:
+
+- The API Providers: Some (like Google or Slack) are releasing "Official" MCP servers.
+
+- The AI Platforms: Anthropic and OpenAI maintain "Reference" servers for things like Google Drive or GitHub.
+
+- The Community: Enthusiasts on platforms like Smithery.ai or Glama.ai write wrappers for popular APIs (like the RapidAPI Cricket ones) so that other developers don't have to start from scratch.
+
+### The Two Ways to "Connect"
+
+| Feature        | Local (stdio) Transport                                                 | Remote (HTTP/SSE) Transport                                      |
+|----------------|-------------------------------------------------------------------------|------------------------------------------------------------------|
+| Analogy        | A Pipe. Like cat file | grep.                                           | A Socket. Like curl https://api...                               |
+| Who starts it? | The Client (Your Agent) spawns it as a subprocess.                      | The Provider (RapidAPI) keeps it running 24/7.                   |
+| Connection     | stdin / stdout                                                          | HTTP POST + Server-Sent Events                                   |
+| Use Case       | Most current GitHub/NPM MCP servers (the ones you find on Smithery.ai). | Enterprise/Cloud services (like a hosted DB or specialized API). |
+
+### The "Big Three" of MCP Connectivity
+
+| Connection Method      | What it is    | How it works                                                                  | Analogy                                            |
+|------------------------|---------------|-------------------------------------------------------------------------------|----------------------------------------------------|
+| 1. Stdio (Local)       | Child Process | Agent spawns the server on your PC. They talk via system pipes.               | A personal translator sitting in your room.        |
+| 2. SSE / HTTP (Remote) | Web Service   | Agent connects directly to a URL over the internet.                           | Calling a translator over the phone.               |
+| 3. mcp-remote (Bridge) | The Hybrid    | Agent spawns a tiny local process (mcp-remote) which then calls a remote URL. | Hiring a local guy to call the translator for you. |
+
+
+### Comparing the "Chain of Command"
+
+| Feature      | Local (Stdio) Mode                              | Remote (SSE) Mode                             |
+|--------------|-------------------------------------------------|-----------------------------------------------|
+| Architecture | Parent-Child Process. Your agent is the parent. | Client-Server. Your agent is a web client.    |
+| Transport    | stdin / stdout pipes.                           | HTTP POST + Server-Sent Events.               |
+| Lifecycle    | Spawned on demand. Killed when agent stops.     | Always-on. Lives independently in the cloud.  |
+| Security     | Isolated to your machine. No network exposed.   | Requires HTTPS, API keys, or JWT tokens.      |
+| Latency      | Near-zero. No network overhead.                 | Network-dependent. (Approx. 20–100ms).        |
+| Best For     | IDEs, local CLI tools, secure local databases.  | SaaS, Mobile apps, shared team data sources.  |
+
+| Mode          | Transport    | Mechanism                                              | Use Case                                        |
+|---------------|--------------|--------------------------------------------------------|-------------------------------------------------|
+| Local (Stdio) | stdin/stdout | The Agent spawns the MCP Server as a local subprocess. | Local development and CLI-based tools.          |
+| Remote (SSE)  | HTTP/SSE     | The Agent connects to an existing remote URL.          | Production web/mobile apps and shared services. |
+
+
+| Model         | The Chain                                               | Where the "Logic" Lives                                               |
+|---------------|---------------------------------------------------------|-----------------------------------------------------------------------|
+| Local (Stdio) | Agent → Local Wrapper (on your PC) → RapidAPI (Cloud)   | The wrapper logic is running on your machine as a child process.      |
+| Remote (SSE)  | Agent → Remote Wrapper (on a Server) → RapidAPI (Cloud) | The wrapper logic is running on a web server, which you call via URL. |
+
+
+### Stdio Mode
+
+In Stdio mode, the "Server" is really just a local process that your agent (the Host) manages. It’s like having a dedicated translator sitting in the same room as you, rather than calling one in a different country.
+
+In Stdio mode, the MCP Server is a local subprocess of the Agent. This ensures low-latency, secure communication via system pipes without the need for network configuration or open ports.
+
+- The Chain: Your Agent <—(Stdio/JSON-RPC)—> Local MCP Wrapper <—(HTTP/REST)—> Remote Cricket API.
+- Both the MCP Client (your agent) and the MCP Server run on the same host machine.
+
+#### How it works
+
+Our LangGraph Agent (the Host) spawns the MCP Server as a local child process.
+
+The Communication: Instead of HTTP requests over the internet, the Agent and the MCP Server talk by "typing" to each other through system pipes (stdin/stdout).
+
+The Logic: This local translator sits on the host machine, receives high-level commands from the Agent, and then makes the traditional REST API calls to the remote Cricket data source.
+
+#### The Parent-Child Process Model
+When you run your LangGraph application, it acts as the Parent Process. When it reaches the line of code that initializes the MCP connection:
+
+- The Spawn: Your Agent (Parent) tells the OS to start a new Child Process (the MCP Server).
+
+- The Pipes: The OS creates two "pipes" (unidirectional data channels) between them:
+
+    -   Stdin: The Parent writes to the Child's input.
+
+    -   Stdout: The Child writes to the Parent's output.
+
+- The Handshake: They immediately begin "typing" JSON-RPC messages to each other through these pipes to negotiate capabilities.
+
+#### how to handle a "Zombie Process"
+- what happens if your Agent crashes but the local MCP Server stays running—and how to prevent it?
+
+### SSE Mode
+
+- The "Translator" (MCP server) is moved to the cloud.
+- The Chain: Your Agent <—(HTTP/SSE)—> Remote MCP Wrapper <—(Internal)—> Cricket Data.
+
+Unlike Stdio, where communication is a simple two-way pipe, SSE is traditionally unidirectional (Server → Client). To achieve the bidirectional communication MCP requires, it uses two distinct channels:
+
+- The "Get" Channel (SSE): The Agent (Client) opens a long-lived HTTP GET request to the MCP Server. The server uses this to push messages (tool results, logs, or notifications) to the agent.
+
+- The "Post" Channel (HTTP): When the Agent wants to send a command (like tools/call), it sends a standard HTTP POST request to a specific endpoint provided by the server during the handshake.
+
+### Code sample
+
+```
+async def runit():
+    server_params = StdioServerParameters(
+        command="npx",
+        args=[
+            "mcp-remote",
+            "https://mcp.rapidapi.com",
+            "--header",
+            "x-api-host: cricbuzz-cricket.p.rapidapi.com",
+            "--header",
+            f"x-api-key: {os.getenv("RAPIDAPI_API_KEY")}",
+        ]
+    )
+    
+    async with stdio_client(server_params) as (read, write):
+        global agent
+        global model_with_tools
+        global tool_node_remote
+        
+        DATABASE_URL = os.getenv("DATABASE_URL")
+        
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            mcp_tools = await load_mcp_tools(session)
+            print("mcp tools loaded..")
+            
+            tool_node_remote = ToolNode(mcp_tools)
+
+```
+
+#### Breakdown of the Logic
+##### The Connection Parameters (server_params)
+This block defines how to talk to the remote server.
+- ```command="npx"```: It uses Node.js's package runner to execute a tool.
+- ```mcp-remote```: This is the specific MCP inspector/proxy tool. This is the "Bridge Utility." Its job is to talk Stdio to your Python script and HTTPS/SSE to RapidAPI.
+- ```https://mcp.rapidapi.com```: This is the gateway URL.
+- ```Headers```: It passes the RapidAPI credentials (host and key) so the remote server knows who is making the request.
+
+##### The Communication Tunnel (stdio_client)
+``` async with stdio_client(server_params) as (read, write):```
+
+This opens a "pipe" between your Python script and the npx process.
+- read: Where Python listens for data coming back from the API.
+- write: Where Python sends commands (like "Get me the score for match X").
+
+##### Session Initialization
+
+``` 
+async with ClientSession(read, write) as session:
+    await session.initialize()
+```
+The client and the remote server perform a "handshake." They agree on versioning and capabilities before any data is exchanged.
+This line actually spawns the npx mcp-remote process. It creates two "pipes" (read and write) so your Python script can send and receive data from that subprocess.
+
+##### Tool Discovery and Integration
+- ```session.initialize()```: This is the Handshake. Your script says "Hello" to the remote server, and the server replies with its version and capabilities.
+- ```load_mcp_tools(session)```: This asks the remote server: "What functions do you have available?" The server might respond with "get_live_score," "get_player_stats," etc. Discovery step.
+- ```ToolNode(mcp_tools)```: It takes those remote functions and packages them into a format that a LangGraph AI agent can understand and call automatically.
+
+##### Summary
+1) Spawn a process to talk to RapidAPI.
+2) Establish a secure communication session.
+3) Fetch the definitions of all available cricket tools.
+4) Register those tools into a ToolNode so your AI agent can decide when to use them.
 
 ## References
 - chatgpt model comparision - https://developers.openai.com/api/docs/models/compare
