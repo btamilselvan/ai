@@ -11,7 +11,12 @@ langchain-deepseek
 #grandlaf is to draw the graph workflow
 grandalf
 
+# A modern implementation of a PostgreSQL adapter for Python
+# Binary installation and Psycopg connection pools support
+psycopg[binary,pool]
 psycopg[binary,pool]
 langgraph-checkpoint-postgres
+
+langchain-mcp-adapters
 
 # langgraph-checkpoint-redis

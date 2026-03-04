@@ -1,2 +1,7 @@
 lc_basic/.env
 lc_basic/__pycache__
+**/*.pyc
+**/*.pckl
+**/*.env
+.DS_Store
+aienv312/**

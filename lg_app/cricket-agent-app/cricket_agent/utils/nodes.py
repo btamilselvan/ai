@@ -1,5 +1,6 @@
 from cricket_agent.utils.state import MyAppState
 from langgraph.types import interrupt, Command
+from langgraph.prebuilt import ToolNode
 from langchain.messages import SystemMessage, AIMessage, ToolMessage
 from typing import Literal
 
@@ -80,6 +81,13 @@ def tool_tode(state: MyAppState, tool_by_name) -> Command[Literal["llm"]]:
   
     #return the new messages. this will be appended to the existing list of messages.
     return {"messages": tool_result, "tool_calls": tool_calls}
+
+async def tool_node_wrapper(state: MyAppState, tool_node_remote: ToolNode):
+    print("execute tool node \n")
+    result = await tool_node_remote.ainvoke(state)
+    
+    print(f"Remote tool node result: {result}")
+    return result
 
 # 5.3 - conditional edge (decide whether to call the tool or not)
 def planner_node(state: MyAppState) -> Literal["tool", "END"]:

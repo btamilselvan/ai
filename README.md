@@ -139,6 +139,8 @@ Use long-term memory to store user-specific or application-specific data across 
 - Run locally (install ollama and download the model(s))
 
 ## LangSmith App
+- https://docs.langchain.com/langsmith/local-dev-testing
+
 ### Local dev
 - Install langgraph-cli and "langgraph-cli[inmem]"
 - pip install langgraph-cli "langgraph-cli[inmem]"
@@ -149,6 +151,14 @@ Use long-term memory to store user-specific or application-specific data across 
     from cricket_agent.utils.state import MyAppState
     from cricket_agent.utils.nodes import llm_node, tool_tode, planner_node
 ```
+- Access API docs, http://127.0.0.1:2024/docs
+
+### Prod build
+- Docker is required for prod builds
+- Run, ```langgraph up```
+- PostgreSQL container
+- Redis container
+- API server containe
 
 ## MCP (Model Context Protocol)
 
@@ -327,7 +337,169 @@ This line actually spawns the npx mcp-remote process. It creates two "pipes" (re
 3) Fetch the definitions of all available cricket tools.
 4) Register those tools into a ToolNode so your AI agent can decide when to use them.
 
+## Build & Deployment
+### Components
+
+#### Agent Server
+Defines an opinionated API and runtime for deploying graphs and agents. Handles execution, state management, and persistence so you can focus on building logic rather than server infrastructure. 
+Agent Server offers an API for creating and managing agent-based applications.
+
+#### Control Plane
+The UI and APIs for creating, updating, and managing Agent Server deployments.
+
+#### Data Plane
+The runtime layer that executes your graphs, including Agent Servers, their backing services (PostgreSQL, Redis, etc.), and the listener that reconciles state from the control plane.
+
+### Deployment
+### How to deploy
+- ```Cloud```: Deploy from GitHub repositories with fully managed infrastructure.
+- ```Hybrid or self-hosted with control plane```: Build Docker images and deploy via the UI.
+- ```Standalone servers```: Deploy Agent Servers directly without the control plane.
+
+## MCP
+- Stateful protocol
+
+### Scope
+- MCP inclues the following projects:
+- MCP Specification - A specification of MCP that outlines the implementation requirements for clients and servers.
+- MCP SDKs
+- MCP Development Tools
+- Reference Server Implementation
+
+### Participants
+
+Key participants in the MCP architecture:
+
+- MCP Host: The AI application that coordinates and manages one or multiple MCP clients
+- MCP Client: A component that maintains a connection to an MCP server and obtains context from an MCP server for the MCP host to use
+- MCP Server: A program that provides context to MCP clients
+
+Note that MCP server refers to the program that serves context data, regardless of where it runs. MCP servers can execute locally or remotely.
+
+### Layers
+
+MCP consists of two layers:
+
+- ```Data Layer``` - User JSON-RPC based protocol. Defines data structure and semantics. Focus on the data exchane b/w client and server.
+- ```Transport Layer``` - manages communication channels and authentication between clients and servers.
+
+### Anatomy of the Exchange
+- It is called JSON-RPC because it follows a very specific "Request-Response" pattern. It’s not just "sending JSON"—it's a structured conversation where every message has an id to keep track of the mail.
+
+#### Request (From Agent to MCP Server)
+```
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "method": "tools/call",
+  "params": {
+    "name": "get_upcoming_schedule",
+    "arguments": { "team": "India" }
+  }
+}
+```
+#### Response (From MCP Server to Agent):
+```
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "result": {
+    "content": [
+      { "type": "text", "text": "Next match: India vs Pakistan, March 5th." }
+    ]
+  }
+}
+```
+
+#### Why not just use standard REST (GET/POST) between the Agent and the MCP Server?
+- ```Stateful Handshakes```: JSON-RPC is better for long-lived connections (like a Stdio pipe or an SSE stream) where the server needs to "announce" its tools to the client as soon as it wakes up.
+
+- ```Bidirectional Notifications```: The server can send "Notifications" (messages without an ID) to the agent, like: "Hey, I'm still processing the cricket data, hang tight."
+
+- ```Strict Contract```: In REST, you might get a 404 or a 500 error. In JSON-RPC, the error is a structured JSON object that tells the LLM exactly what went wrong (e.g., Invalid Params), allowing the LLM to fix its own mistake and try again.
+
+### Transport Layer Mechanism
+#### Stdio
+Uses standard input/output streams for direct process communication between local processes on the same machine, providing optimal performance with no network overhead.
+
+#### Streamable HTTP transport
+Uses HTTP POST for client-to-server messages with optional Server-Sent Events for streaming capabilities.
+
+### Three core primitives that MCP servers can expose
+
+- Tools - Executable functions that AI apps can invoke
+- Resources - Data resources that provide contextual information to the AI apps
+- Prompts - Reusable templates that help structure interactions with language models (e.g., system prompts, few-shot examples)
+
+```e.g. consider an MCP server that provides context about a database. It can expose tools for querying the database, a resource that contains the schema of the database, and a prompt that includes few-shot examples for interacting with the tools. ```
+
+| Primitive | Role in LangGraph                                      |
+|-----------|--------------------------------------------------------|
+| Tool      | Something the LLM chooses to call during execution.    |
+| Resource  | Static data (like a README) the LLM can read.          |
+| Prompt    | A template that shapes how the LLM thinks or responds. |
+
+
+| Feature        | Tools                                  | Prompts                                          |
+|----------------|----------------------------------------|--------------------------------------------------|
+| Querying       | Done once at startup (tools/list).     | Done once at startup (prompts/list).             |
+| Timing         | Triggered mid-conversation by the LLM. | Triggered at the beginning or to pivot context.  |
+| Logic          | Executes a function (RPC).             | Returns a structured message template.           |
+| LangGraph Role | A node in the graph (ToolNode).        | Used to construct the SystemMessage.             |
+
+- Resources expose data from files, APIs, databases, or any other source that an AI needs to understand context.
+- tools/list, tools/call, resources/list, resources/templates/list, resources/read, resources/subscribe, prompts/list, prompts/get
+
+### MCP clients
+MCP clients are instantiated by host applications to communicate with particular MCP servers.
+The host is the application users interact with, while clients are the protocol-level components that enable server connections.
+Responsible for establishing and managing connections with MCP servers.
+
+#### Client Features
+- Elicitation - enables servers to request specific information from users during interactions - e.g A server booking travel may ask for the user’s preferences on airplane seats, room type or their contact number to finalise a booking.
+- Roots - allow clients to specify which directories servers should focus on - e.g. A server for booking travel may be given access to a specific directory, from which it can read a user’s calendar.
+- Sampling - allows servers to request LLM completions through the client - e.g A server for booking travel may send a list of flights to an LLM and request that the LLM pick the best flight for the user.
+
+### Data Layer - Lifecycle sequence
+- Initialization Exchange
+    - Exchange - protocol version, capabilities, server/client info
+- Tools Discovery
+    - Tool name, description, and schema
+- Tool Execution
+    - tool/call request
+- Real-time updates (notifications) - notify clients when server's available tools changed (without expecting a client response)
+
+### MCP Server implementation - Spring AI vs FastMCP
+
+| Feature         | Spring AI Starter (Java)             | FastAPI + FastMCP (Python)              |
+|-----------------|--------------------------------------|-----------------------------------------|
+| Onboarding      | Moderate (requires Spring knowledge) | Very Easy (minimal boilerplate)         |
+| Tool Definition | @McpTool annotations                 | @mcp.tool() decorators                  |
+| Performance     | High (Multi-threaded / Low Latency)  | Moderate (Async I/O / Uvicorn)          |
+| AI Native       | Learning (Spring AI is maturing)     | Native (Deep integration with AI libs)  |
+| Deployment      | Self-contained JAR (Docker)          | Uvicorn / Gunicorn (Docker)             |
+| Transport       | Stdio, SSE, Streamable HTTP          | Stdio, SSE, Streamable HTTP             |
+
+### MCP server using FastMCP
+
+- ```uv``` is the "Swiss Army Knife" of the Python world. uv is an extremely fast Python package installer and resolver written in Rust. It is designed to replace pip, pip-compile, and venv all at once.
+    - Zero-Config Execution: You can run an MCP server without manually creating a virtual environment. uv handles it in the background.
+    - Speed: It is often 10–100x faster than pip.
+    - Reproducibility: It uses a pyproject.toml or uv.lock file to ensure that if I run your server and you run your server, we have the exact same dependencies.
+
 ## References
+- https://api.smith.langchain.com/docs
 - chatgpt model comparision - https://developers.openai.com/api/docs/models/compare
 - ollama langchain integration - https://docs.langchain.com/oss/python/integrations/chat/ollama
 - Providers list - https://docs.langchain.com/oss/python/integrations/providers/overview
+- Spring AI MCP Server - https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html
+
+## TODO
+- Local MCP server
+- Prod like MCP server deployment
+- Design Patterens
+- Best Practices
+- Handle errors (handle stale/abondoned MCP connections)
+- Debugging techniques - https://docs.langchain.com/langsmith/observability
+- Scalability and latency - https://docs.langchain.com/langsmith/observability
+- Production build and deployment - https://docs.langchain.com/langsmith/platform-setup
