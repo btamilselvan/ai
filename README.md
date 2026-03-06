@@ -133,6 +133,16 @@ Use long-term memory to store user-specific or application-specific data across 
 - install packages included in requirements.tx ``` pip3 install -r lc_requirements.txt ```
 - list all installed packages ```pip list```
 - add all installed packages to requirements.txt - ``` pip freeze > requirements.txt ```
+- install uv ``` brew install uv ``` 
+
+### uv
+- drop-in replacement for pip, pip-compile, and virtualenv
+Step	Old "Pip" Way	New "uv" Project Way
+Setup	python -m venv .venv	uv init
+Activate	source .venv/bin/activate	Not strictly required (use uv run)
+Install	pip install -r requirements.txt	uv add -r requirements.txt
+Update	Manually edit text file	uv add package_name
+Deploy	Hope pip install works the same	uv sync (uses exact uv.lock)
 
 ## Ollama
 
