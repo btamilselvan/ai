@@ -137,12 +137,36 @@ Use long-term memory to store user-specific or application-specific data across 
 
 ### uv
 - drop-in replacement for pip, pip-compile, and virtualenv
+- ```uv``` is the "Swiss Army Knife" of the Python world. uv is an extremely fast Python package installer and resolver written in Rust. It is designed to replace pip, pip-compile, and venv all at once.
+    - Zero-Config Execution: You can run an MCP server without manually creating a virtual environment. uv handles it in the background.
+    - Speed: It is often 10–100x faster than pip.
+    - Reproducibility: It uses a pyproject.toml or uv.lock file to ensure that if I run your server and you run your server, we have the exact same dependencies.
+
 Step	Old "Pip" Way	New "uv" Project Way
 Setup	python -m venv .venv	uv init
 Activate	source .venv/bin/activate	Not strictly required (use uv run)
 Install	pip install -r requirements.txt	uv add -r requirements.txt
 Update	Manually edit text file	uv add package_name
 Deploy	Hope pip install works the same	uv sync (uses exact uv.lock)
+
+List available versions: uv python list
+
+Install a specific version: uv python install 3.11
+
+Install the latest: uv python install latest
+
+If you have a project folder and want it to always use Python 3.12, run this inside the folder:
+
+uv python pin 3.12
+
+If you are using the uv venv workflow and want to create a virtual environment with a specific version:
+
+uv venv --python 3.10
+
+- create venv: uv venv --python 3.12
+
+uv run python --version
+uv python list
 
 ## Ollama
 
@@ -154,7 +178,10 @@ Deploy	Hope pip install works the same	uv sync (uses exact uv.lock)
 ### Local dev
 - Install langgraph-cli and "langgraph-cli[inmem]"
 - pip install langgraph-cli "langgraph-cli[inmem]"
+- uv pip install langgraph-cli
+- uv pip install "langgraph-cli[inmem]"
 - Run, ```langgraph dev```
+- uv run langgraph dev
 - When you import functions from one module to another (e.g. agent.py imports tools and nodes), make sure to use the full module path in the import statement. For example, 
 
 ``` cricket_agent/agent.py -> import functions from utils/nodes.py and utils/tools.py
@@ -492,10 +519,6 @@ Responsible for establishing and managing connections with MCP servers.
 
 ### MCP server using FastMCP
 
-- ```uv``` is the "Swiss Army Knife" of the Python world. uv is an extremely fast Python package installer and resolver written in Rust. It is designed to replace pip, pip-compile, and venv all at once.
-    - Zero-Config Execution: You can run an MCP server without manually creating a virtual environment. uv handles it in the background.
-    - Speed: It is often 10–100x faster than pip.
-    - Reproducibility: It uses a pyproject.toml or uv.lock file to ensure that if I run your server and you run your server, we have the exact same dependencies.
 
 ## References
 - https://api.smith.langchain.com/docs
