@@ -168,6 +168,30 @@ uv venv --python 3.10
 uv run python --version
 uv python list
 
+| Category                 | Action                                    | Command                             |
+|--------------------------|-------------------------------------------|-------------------------------------|
+| Project Setup            | Initialize a new project                  | uv init                             |
+|                          | Install all dependencies from lockfile    | uv sync                             |
+|                          | View dependency tree                      | uv tree                             |
+| Package Management       | Add and save a package                    | uv add <package>                    |
+| (Updates pyproject.toml) | Add a development-only package            | uv add --dev <package>              |
+|                          | Remove a package                          | uv remove <package>                 |
+|                          | Upgrade a specific package                | uv add <package>@latest             |
+| Execution                | Run a script in the project venv          | uv run <file.py>                    |
+|                          | Run a tool (e.g., LangGraph)              | uv run <tool-command>               |
+|                          | Run a tool without a project (pipx style) | uvx <tool-name>                     |
+|                          | Run with temporary package                | uv run --with <package> <cmd>       |
+| Python Versions          | List available Python versions            | uv python list                      |
+|                          | Install a specific Python version         | uv python install 3.12              |
+|                          | Pin Python version for project            | uv python pin 3.11                  |
+|                          | Find current Python path                  | uv python find                      |
+| Legacy / pip Mode        | Create a manual venv                      | uv venv                             |
+| (Does NOT touch TOML)    | Install without adding to TOML            | uv pip install <package>            |
+|                          | Install from requirements.txt             | uv pip install -r requirements.txt  |
+|                          | Generate a requirements.txt               | uv pip freeze > requirements.txt    |
+|                          | Uninstall a package                       | uv pip uninstall <package>          |
+
+
 ## Ollama
 
 - Run locally (install ollama and download the model(s))
