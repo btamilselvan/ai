@@ -20,3 +20,4 @@ psycopg[binary,pool]
 
 mcp
 langchain-mcp-adapters
+fastmcp

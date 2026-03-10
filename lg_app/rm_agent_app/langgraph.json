@@ -1,0 +1,10 @@
+{
+    "dependencies": [
+        "./"
+    ],
+    "env": "./.env",
+    "python_version": "3.12",
+    "graphs": {
+        "rm_agent": "./rm_agent/rm_agent_with_mcp.py:agent"
+    }
+}

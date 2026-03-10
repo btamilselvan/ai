@@ -1,0 +1,9 @@
+[project]
+name = "rm-mcp-server"
+version = "0.1.0"
+description = "Recipe Manager MCP Server"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=3.1.0",
+]
