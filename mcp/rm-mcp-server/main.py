@@ -31,25 +31,25 @@ def recipe_search(query: str) -> list[dict]:
             recipes.append({"id": recipe["id"], "title": recipe["title"]})
     return recipes
 
-# resources return string response
-@mcp.resource(uri="recipe://details/{id}")
-def get_recipe_details(id: int) -> str:
+
+@mcp.tool
+def get_recipe_details(recipe_id: int) -> dict:
     """
     Get the full details of a recipe by its ID.
     """
-    print(f"Fetching details for recipe ID: {id}")
-    
+    print(f"Fetching details for recipe ID: {recipe_id}")
+
     for recipe in mock_recipes:
-        if recipe["id"] == id:
-            return json.dumps(recipe, indent=2)
-    return "Recipe not found"
+        if recipe["id"] == recipe_id:
+            return recipe
+    return {"error": f"Recipe with ID {recipe_id} not found."}
 
-
+# resources return string response
 @mcp.resource(uri="recipe://docs/safety")
 def get_safety_guidelines() -> str:
     """Mandatory kitchen safety protocols."""
     print("Fetching safety guidelines...")
-    
+
     return """
     Safety Guidelines for Cooking:
     1. Always wash your hands before handling food.

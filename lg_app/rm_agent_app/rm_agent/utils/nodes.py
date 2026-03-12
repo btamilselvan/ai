@@ -1,21 +1,39 @@
 from rm_agent.utils.state import RecipeAppState
 from langgraph.prebuilt import ToolNode
-from langchain.messages import SystemMessage, AIMessage, ToolMessage
+from langchain.messages import SystemMessage, AIMessage, ToolMessage, HumanMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.types import Command
 from typing import Literal
+from langchain_core.vectorstores import VectorStoreRetriever
 import re
 
 
-def llm_node(state: RecipeAppState, model_with_tools, system_prompt) -> RecipeAppState:
-    print(f"Entering LLM node {len(state.get("messages", []))}")
-    messages = state.get("messages", []).copy()
+def rag_node(state: RecipeAppState, retriever: VectorStoreRetriever) -> RecipeAppState:
+    print("entering RAG Node..")
+    last_message = state.get("messages", [])[-1]
     
+    print(f"Last message {((last_message["content"][0])["text"])}")
+    docs = retriever.invoke(((last_message["content"][0])["text"]))
+    context = "\n".join(doc.page_content for doc in docs) if docs else ""
+    print(f"Context: {context}")
+    return RecipeAppState(context=context)
+
+
+def llm_node(state: RecipeAppState, model_with_tools, system_prompt: str) -> RecipeAppState:
+    print(f"Entering LLM node {len(state.get("messages", []))}")
+
+    print(f"system prompt {system_prompt}, context {state.get("context", "")}")
+
+    updated_system_prompt = system_prompt.format(
+        context=state.get("context", ""))
+
+    messages = state.get("messages", []).copy()
+
     last_message = state.get("messages", [])[-1]
     print(f"Last message {last_message}")
     # print(f"Messages {messages}")
     message = model_with_tools.invoke(
-        [SystemMessage(content=system_prompt)] + messages)
+        [SystemMessage(content=updated_system_prompt)] + messages)
     return RecipeAppState(messages=[message])
 
 
@@ -58,34 +76,34 @@ async def tool_node_wrapper(state: RecipeAppState, mcp_tool_node: ToolNode) -> R
 
 async def resource_node(state: RecipeAppState, mcp_client: MultiServerMCPClient) -> RecipeAppState:
     """Fetch resource content by URI."""
-    
+
     print("execute resource node...")
-    
+
     messages = state.get("messages", [])
     last_message = messages[-1] if messages else None
-    
+
     print(f"last message {last_message}")
-    
+
     try:
         if "recipe://details" in last_message.content:
-            
+
             pattern = r"recipe://details/(\d+)"
-            
+
             matches = re.finditer(pattern, last_message.content)
             matches = list(matches)
-            
-            if(len(matches) > 0):
+
+            if (len(matches) > 0):
                 resource_uri = matches[0].group(0)
 
                 print(f"Fetching resource: {resource_uri}")
-            
+
                 resource_content = await mcp_client.get_resources(uris=resource_uri)
-            
+
                 resource_data = "NOT FOUND"
-            
+
                 if len(resource_content) > 0:
                     resource_data = resource_content[0].data
-            
+
                 print(f"Resource content: {resource_content[0]}")
                 return RecipeAppState(messages=[SystemMessage(content=f"Resource Data from {resource_uri}: {resource_data}")])
 

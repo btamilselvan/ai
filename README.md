@@ -543,6 +543,15 @@ Responsible for establishing and managing connections with MCP servers.
 
 ### MCP server using FastMCP
 
+### Patterns
+- Avoid "Prompt Stuffing"
+#### Prompt Stuffing
+- Prompt stuffing means loading a lot of external content into the prompt before the LLM runs, even if the user may not need it.
+- e.g,. pushing the resource details (safety guidelines, measurement spec) into the system prompt. this leads to token waste, irrelevant context leads to worse model performance and harder to maintain when 
+more resources are added later.
+#### How to address
+option 1) expose the resources as tools
+option 2)
 
 ## References
 - https://api.smith.langchain.com/docs
@@ -554,9 +563,8 @@ Responsible for establishing and managing connections with MCP servers.
 ## TODO
 - Local MCP server
 - Prod like MCP server deployment
-- Design Patterens
-- Best Practices
-- Handle errors (handle stale/abondoned MCP connections)
+- Design Patterns
+- Handle errors (handle stale/abandoned MCP connections)
 - Debugging techniques - https://docs.langchain.com/langsmith/observability
 - Scalability and latency - https://docs.langchain.com/langsmith/observability
 - Production build and deployment - https://docs.langchain.com/langsmith/platform-setup

@@ -9,3 +9,5 @@ class RecipeAppState(TypedDict):
     messages: Annotated[List[AnyMessage], operator.add]
     llm_calls: int
     tool_calls: int
+    # context: Annotated[str, operator.concat]
+    context: str

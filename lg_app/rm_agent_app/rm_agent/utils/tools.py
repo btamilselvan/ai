@@ -1,5 +1,6 @@
 from rm_agent.utils.state import RecipeAppState
 from langchain.tools import tool
+from langchain_mcp_adapters.client import MultiServerMCPClient
 # from langchain.to
 
 mock_recipes = [
@@ -50,9 +51,9 @@ def get_recipe_by_id(recipe_id: int):
 @tool
 def get_resources(resource_uri: str) -> str:
     """Fetch resources like safety guidelines or measurements."""
-    
+
     print(f"Fetching resource: {resource_uri}")
-    
+
     if "safety" in resource_uri:
         return get_safety_guidelines()
     elif "measurements" in resource_uri:
