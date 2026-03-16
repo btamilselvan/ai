@@ -1,0 +1,48 @@
+volumes:
+    langgraph-data:
+        driver: local
+services:
+    langgraph-redis:
+        image: redis:6
+        healthcheck:
+            test: redis-cli ping
+            interval: 5s
+            timeout: 1s
+            retries: 5
+    langgraph-postgres:
+        image: postgres:16
+        ports:
+            - "5432:5432"
+        environment:
+            POSTGRES_DB: postgres
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: lpjrn12lruxrmfkybu
+        volumes:
+            - langgraph-data:/var/lib/postgresql/data
+        healthcheck:
+            test: pg_isready -U postgres
+            start_period: 10s
+            timeout: 1s
+            retries: 5
+            interval: 5s
+    rm-mcp:
+        #built separately
+        image: rm-mcp:latest
+        ports:
+          - "8000:8000"
+    langgraph-api:
+        image: rm_agent
+        ports:
+            - "8123:8000"
+        depends_on:
+            langgraph-redis:
+                condition: service_healthy
+            langgraph-postgres:
+                condition: service_healthy
+        env_file:
+            - .env
+        environment:
+            REDIS_URI: redis://langgraph-redis:6379
+            LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
+            DATABASE_URI: postgres://postgres:lpjrn12lruxrmfkybu@langgraph-postgres:5432/postgres?sslmode=disable
+            MCP_SERVER_URL: http://rm-mcp:8000/sse

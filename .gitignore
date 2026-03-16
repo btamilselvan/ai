@@ -5,3 +5,6 @@ lc_basic/__pycache__
 **/*.env
 .DS_Store
 aienv312/**
+lg_app/rm_agent_app/ingestion/chroma_db/
+lg_app_util/rm_agent_util/ingestion/chroma_db/
+.vscode

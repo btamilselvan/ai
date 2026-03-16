@@ -1,3 +1,4 @@
+import os
 import asyncio
 from functools import partial
 from dotenv import load_dotenv
@@ -17,6 +18,12 @@ print("hello rm agent..")
 
 # load environment variables
 load_dotenv()
+
+CHROMA_CLOUD_API_KEY = os.getenv("CHROMA_CLOUD_API_KEY")
+CHROMA_TENANT = os.getenv("CHROMA_TENANT")
+
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/sse")
+print(f"MCP_SERVER_URL: {MCP_SERVER_URL}")
 
 # System prompt
 SYSTEM_PROMPT = """
@@ -39,22 +46,32 @@ Use the provided context when answering questions about food safety, cooking tec
 model = init_chat_model("deepseek-chat", temperature=0.5, max_tokens=2048)
 
 # MCP client session has to be open throughout the agent interactions
+# mcp_client = MultiServerMCPClient({
+#     "rm_mcp_server": {
+#         "transport": "stdio",
+#         "command": "python",
+#         "args": [
+#             "/Users/tamil/tamil/git_repository/tamil/ai/mcp/rm-mcp-server/main.py"
+#         ]
+#     }
+# })
+
 mcp_client = MultiServerMCPClient({
     "rm_mcp_server": {
-        "transport": "stdio",
-        "command": "python",
-        "args": [
-            "/Users/tamil/tamil/git_repository/tamil/ai/mcp/rm-mcp-server/main.py"
-        ]
+        "transport": "sse",
+        "url": MCP_SERVER_URL
     }
 })
 
-# initialize chromadb
+# initialize chromadb (cloud store)
 embedding_function = HuggingFaceEmbeddings(model_name="BAAI/bge-large-en-v1.5")
 vector_store = Chroma(collection_name="rm_knowledge_collection",
-                      persist_directory="/Users/tamil/tamil/git_repository/tamil/ai/lg_app/rm_agent_app/ingestion/chroma_db",
+                      database="tracks_ai",
+                      tenant=CHROMA_TENANT,
+                      chroma_cloud_api_key=CHROMA_CLOUD_API_KEY,
                       embedding_function=embedding_function)
-retriever = vector_store.as_retriever(search_type="similarity")
+retriever = vector_store.as_retriever(
+    search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.5})
 
 
 async def get_resources() -> str:

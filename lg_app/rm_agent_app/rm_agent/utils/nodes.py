@@ -11,7 +11,7 @@ import re
 def rag_node(state: RecipeAppState, retriever: VectorStoreRetriever) -> RecipeAppState:
     print("entering RAG Node..")
     last_message = state.get("messages", [])[-1]
-    
+    print(f"Last message {last_message}")
     print(f"Last message {((last_message["content"][0])["text"])}")
     docs = retriever.invoke(((last_message["content"][0])["text"]))
     context = "\n".join(doc.page_content for doc in docs) if docs else ""
@@ -22,7 +22,7 @@ def rag_node(state: RecipeAppState, retriever: VectorStoreRetriever) -> RecipeAp
 def llm_node(state: RecipeAppState, model_with_tools, system_prompt: str) -> RecipeAppState:
     print(f"Entering LLM node {len(state.get("messages", []))}")
 
-    print(f"system prompt {system_prompt}, context {state.get("context", "")}")
+    # print(f"system prompt {system_prompt}, context {state.get("context", "")}")
 
     updated_system_prompt = system_prompt.format(
         context=state.get("context", ""))

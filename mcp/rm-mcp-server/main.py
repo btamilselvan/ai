@@ -1,5 +1,6 @@
 from fastmcp import FastMCP
 import json
+import uvicorn
 
 # Initalize the server
 mcp = FastMCP()
@@ -76,4 +77,5 @@ def get_measurements() -> str:
 
 # run the server
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    # mcp.run(transport="sse")
+    uvicorn.run(mcp.http_app(transport="sse"), host="0.0.0.0", port=8000)
