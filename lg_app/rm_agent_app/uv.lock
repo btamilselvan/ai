@@ -2703,7 +2703,7 @@ wheels = [
 [[package]]
 name = "rm-agent"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "grandalf" },
     { name = "langchain" },

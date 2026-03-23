@@ -407,9 +407,11 @@ Agent Server offers an API for creating and managing agent-based applications.
 
 #### Control Plane
 The UI and APIs for creating, updating, and managing Agent Server deployments.
+- The LangSmith UI and APIs for managing deployments.
 
 #### Data Plane
 The runtime layer that executes your graphs, including Agent Servers, their backing services (PostgreSQL, Redis, etc.), and the listener that reconciles state from the control plane.
+- The runtime environment where your Agent Servers and agents execute.
 
 ### Deployment
 ### How to deploy
@@ -561,10 +563,12 @@ option 2)
 - Spring AI MCP Server - https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html
 
 ## TODO
-- Local MCP server
+- Local MCP server 
 - Prod like MCP server deployment
 - Design Patterns
 - Handle errors (handle stale/abandoned MCP connections)
 - Debugging techniques - https://docs.langchain.com/langsmith/observability
 - Scalability and latency - https://docs.langchain.com/langsmith/observability
 - Production build and deployment - https://docs.langchain.com/langsmith/platform-setup
+- Summarize messages
+- Multi Agent system

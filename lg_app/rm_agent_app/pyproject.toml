@@ -18,7 +18,13 @@ dependencies = [
     "sentence-transformers>=5.2.3",
 ]
 
-[tool.uv.workspace]
-members = [
-    "ingestion",
-]
+#[tool.uv.workspace]
+#members = [
+#    "ingestion",
+#]
+[project.scripts]
+# Format: command_name = "package.module:function"
+agent_app = "rm_agent.rm_agent:main"
+
+[tool.uv]
+package = true

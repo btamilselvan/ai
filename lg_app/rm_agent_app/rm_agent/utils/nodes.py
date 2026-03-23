@@ -7,13 +7,37 @@ from typing import Literal
 from langchain_core.vectorstores import VectorStoreRetriever
 import re
 
+"""
+e.g. message format (when tested via langgraph UI)
 
+{
+    "assistant_id": "rm_agent",
+    "input": {
+        "messages": [
+            {
+                "type": "human",
+                "content": [
+                    {
+                        "text": "Can you suggest a couple of mouth watering peanut butter recipes?",
+                        "type": "text"
+                    }
+                ]
+            }
+        ]
+    },
+    "stream_mode": "updates"
+}
+
+"""
 def rag_node(state: RecipeAppState, retriever: VectorStoreRetriever) -> RecipeAppState:
     print("entering RAG Node..")
     last_message = state.get("messages", [])[-1]
     print(f"Last message {last_message}")
     print(f"Last message {((last_message["content"][0])["text"])}")
-    docs = retriever.invoke(((last_message["content"][0])["text"]))
+    content = ((last_message["content"][0])["text"])
+    # content = last_message.content
+    print(f"content {content}")
+    docs = retriever.invoke(content)
     context = "\n".join(doc.page_content for doc in docs) if docs else ""
     print(f"Context: {context}")
     return RecipeAppState(context=context)
