@@ -19,7 +19,7 @@ mock_recipes = [
 ]
 
 
-@mcp.tool
+@mcp.tool(name="search")
 def recipe_search(query: str) -> list[dict]:
     """
     Search for recipes by title or ingredients. 
@@ -33,7 +33,7 @@ def recipe_search(query: str) -> list[dict]:
     return recipes
 
 
-@mcp.tool
+@mcp.tool("recipes")
 def get_recipe_details(recipe_id: int) -> dict:
     """
     Get the full details of a recipe by its ID.

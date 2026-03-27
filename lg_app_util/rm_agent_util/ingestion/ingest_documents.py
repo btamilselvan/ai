@@ -11,12 +11,15 @@ load_dotenv()
 CHROMA_CLOUD_API_KEY = os.getenv("CHROMA_CLOUD_API_KEY")
 CHROMA_TENANT = os.getenv("CHROMA_TENANT")
 
-embedding = HuggingFaceEmbeddings(model_name="BAAI/bge-large-en-v1.5")
+# embedding = HuggingFaceEmbeddings(model_name="BAAI/bge-large-en-v1.5")
+embedding = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
 print(f"embedding model initialized {embedding}")
 
 # Initialize Chroma cloud vector store
 vector_store = Chroma(
-    collection_name="rm_knowledge_collection",
+    # collection_name="rm_knowledge_collection",
+    collection_name="rm_knowledge_collection_1",
     embedding_function=embedding,
     # persist_directory="./chroma_db",
     chroma_cloud_api_key=CHROMA_CLOUD_API_KEY,
