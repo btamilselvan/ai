@@ -5,3 +5,5 @@
 
 ### References
 - https://api-docs.deepseek.com
+- https://docs.sqlalchemy.org/en/20/orm/quickstart.html
+- https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html

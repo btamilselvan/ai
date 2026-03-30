@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 import uvicorn
 import datetime
 from utils.models import ChatRequest
@@ -7,6 +7,7 @@ from utils.resource_registry import ResourceRegistry
 import os
 from utils.env_settings import EnvSettings
 from utils.rm_agent import RecipeManagerAgent
+from utils.database import save_messages
 
 load_dotenv()
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -46,11 +47,16 @@ async def lifespan(app: FastAPI):
             resource_registry.setup_ai_client(
                 name, resource_registry.openai_client, model, tools=all_tools)
 
+        # setup database engine
+        resource_registry.create_database_engine(settings.database_url)
+
         app.state.resources = resource_registry
         print("server startup completed...")
 
         yield
         print("server shutdown initiated...")
+        await resource_registry.dispose_database_engine()
+        print("server shutdown completed...")
 
     except Exception as e:
         print(f"error setting up resource registry : {e}")
@@ -67,19 +73,33 @@ def health():
     return f"server is healthy current time is {datetime.datetime.now()}"
 
 
-@app.post("/chat")
-async def chat(data: ChatRequest, request: Request):
+@app.post("/chat/{thread_id}")
+async def chat(thread_id: str, data: ChatRequest, request: Request, background_tasks: BackgroundTasks):
     print(f"chat function called with {data}")
+
+    # load messages for the current conversation thread
 
     # always send the request to the main agent
     resource_registry: ResourceRegistry = request.app.state.resources
     client: RecipeManagerAgent = resource_registry.ai_clients["main_agent"]
-    response = await client.orchestrate(data, mcp_session_map=resource_registry.mcp_sessions,
+    messages = await client.orchestrate(data, mcp_session_map=resource_registry.mcp_sessions,
                                         toolname_servername_map=resource_registry.toolname_servername_map)
-    print(response)
-    if not response:
+    print(messages)
+    if not messages:
         return {"error": "failed to get response from agent"}
-    return {"message": response.choices[0].message.content}
+
+    # summarize the messages
+    # persist messages to the long term store
+    _persist_messages(resource_registry.async_session, thread_id,
+                     background_tasks, messages)
+
+    return {"message": messages[-1]["content"]}
+
+
+def _persist_messages(async_sessionmaker, thread_id: str, background_tasks: BackgroundTasks, messages: list):
+    """ persist messages to database """
+    background_tasks.add_task(
+            save_messages, async_sessionmaker, thread_id, messages)
 
 
 if __name__ == "__main__":

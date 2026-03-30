@@ -10,3 +10,4 @@ class EnvSettings(BaseSettings):
     chroma_tenant: str
     chroma_database: str
     hf_token: str
+    database_url: str

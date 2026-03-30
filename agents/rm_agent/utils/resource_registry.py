@@ -4,6 +4,7 @@ from mcp.client.sse import sse_client
 from typing import Dict
 from openai import OpenAI
 from utils.rm_agent import RecipeManagerAgent
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 
 class ResourceRegistry():
@@ -17,6 +18,21 @@ class ResourceRegistry():
         self.openai_client: OpenAI
         self.tools_map: Dict[str, list] = {}
         self.toolname_servername_map: Dict[str, str] = {}
+        self.async_session: async_sessionmaker[AsyncSession]
+
+    def create_database_engine(self, database_url):
+        """ create database engine and add to registry """
+        print(f"creating database engine with url: {database_url}")
+        engine = create_async_engine(url=database_url, echo=False)
+        async_session = async_sessionmaker(engine, expire_on_commit=False)
+        self.async_session = async_session
+        print(f"database connection ...{async_session}...")
+        
+    async def dispose_database_engine(self):
+        """ dispose database engine """
+        if self.async_session:
+            engine = self.async_session.kw["bind"]
+            await engine.dispose()
 
     async def setup_mcp_client(self, name, url):
         """ setup mcp client and add to registry """
