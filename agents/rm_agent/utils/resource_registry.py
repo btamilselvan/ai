@@ -5,20 +5,28 @@ from typing import Dict
 from openai import OpenAI
 from utils.rm_agent import RecipeManagerAgent
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+import redis
 
 
 class ResourceRegistry():
     """ Registry for all resources. Registry will be stored in the FastAPI app state """
+    redis_client: redis.Redis
+    async_session: async_sessionmaker[AsyncSession]
+    openai_client: OpenAI
 
     def __init__(self):
         # AsyncExitStack - a dynamic, asynchronous version of Try-with- in Java.
         self._stack = AsyncExitStack()
         self.mcp_sessions: Dict[str, ClientSession] = {}
         self.ai_clients: Dict[str, any] = {}
-        self.openai_client: OpenAI
         self.tools_map: Dict[str, list] = {}
         self.toolname_servername_map: Dict[str, str] = {}
-        self.async_session: async_sessionmaker[AsyncSession]
+
+    def setup_redis_client(self, host='localhost', port=6379, db=0, max_connections=10):
+        """ setup redis client and add to registry """
+        pool = redis.ConnectionPool(
+            host=host, port=port, db=db, max_connections=max_connections)
+        self.redis_client = redis.Redis(connection_pool=pool)
 
     def create_database_engine(self, database_url):
         """ create database engine and add to registry """
@@ -27,7 +35,7 @@ class ResourceRegistry():
         async_session = async_sessionmaker(engine, expire_on_commit=False)
         self.async_session = async_session
         print(f"database connection ...{async_session}...")
-        
+
     async def dispose_database_engine(self):
         """ dispose database engine """
         if self.async_session:

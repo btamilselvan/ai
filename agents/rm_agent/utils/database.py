@@ -8,7 +8,11 @@ from sqlalchemy import insert, select, Integer, String, TEXT, TIMESTAMP, func
 from sqlalchemy.orm import DeclarativeBase, Session, Mapped, mapped_column
 import uuid
 import json
-
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
+from uuid import UUID
+from datetime import datetime
+import redis
 
 class Base(AsyncAttrs, DeclarativeBase):
     pass
@@ -36,6 +40,22 @@ class Messages(Base):
                                default=func.current_timestamp())
 
 
+class MessageSchema(BaseModel):
+    # This allows Pydantic to read data directly from the SQLAlchemy object
+    # and not just from a dictionary.  This is important because it means we don't have to write a separate schema for the database models.
+    # It allows Pydantic to "scrape" the data out of the database model so it can then be turned into the clean JSON that Redis requires.
+    model_config = ConfigDict(from_attributes=True, title="MessageSchema")
+
+    id: int
+    thread_id: UUID
+    role: str
+    message: Optional[str] = None
+    summary: Optional[str] = None
+    tool: Optional[str] = None
+    tool_call_id: Optional[str] = None
+    created_at: datetime
+
+
 def _convert_to_messages(thread_id, messages: list[dict]) -> list[Messages]:
     """ convert list of dict messages to list of Messages objects """
 
@@ -60,7 +80,8 @@ def _convert_to_messages(thread_id, messages: list[dict]) -> list[Messages]:
                     "id": tool_call.id
                 })
 
-            print(f"tool calls detected, adding to message content...{tool_calls}")
+            print(
+                f"tool calls detected, adding to message content...{tool_calls}")
             m.message = message["content"] + \
                 "\n Tool Calls: \n" + json.dumps(tool_calls)
 
@@ -69,13 +90,34 @@ def _convert_to_messages(thread_id, messages: list[dict]) -> list[Messages]:
     return list_of_messages
 
 
-async def save_messages(async_sessionmaker: async_sessionmaker[AsyncSession], thread_id: str, messages: list):
+async def save_messages(async_sessionmaker: async_sessionmaker[AsyncSession], r: redis.Redis, thread_id: str, messages: list):
     """ save messages to database """
 
     async with async_sessionmaker() as session:
         async with session.begin():
             session.add_all(_convert_to_messages(thread_id, messages))
         await session.commit()
+    
+    # _save_messages_to_redis(r, thread_id, messages)
+    return messages
+
+def _save_messages_to_redis(r, thread_id: str, messages: list):
+    """ save messages to redis """
+    # convert list of Messages objects to list of dict messages
+    print(f"converting messages to json for redis storage: {messages}")
+    json_messages = convert_messages_to_json(_convert_to_messages(thread_id, messages))
+    
+    result = None
+    if (r.exists(thread_id)):
+        # if the thread already exists, we want to append the message to the existing list of messages for that thread
+        result = r.json().arrappend(
+            thread_id, "$", json_messages)
+    else:
+        # if the thread does not exist, we want to create a new list of messages for that thread and add the message to that list
+        result = r.json().set(thread_id, "$", json_messages)
+
+    print(f"result of storing message in redis: {result}")
+    return result
 
 
 # async def save_message(async_sessionmaker, thread_id: str, role: str,
@@ -97,3 +139,29 @@ async def get_messages_by_thread_id(async_sessionmaker, thread_id: str):
         result = await session.execute(select(Messages).where(Messages.thread_id == thread_id))
         messages = result.scalars().all()
         return messages
+
+
+def convert_messages_to_dict(messages: list[Messages]) -> list[dict]:
+    """ convert list of Messages objects to list of dict messages """
+
+    list_of_dict_messages = []
+    for message in messages:
+        m = {
+            "id": message.id,
+            "thread_id": str(message.thread_id),
+            "role": message.role,
+            "content": message.message,
+            "summary": message.summary,
+            "tool": message.tool,
+            "tool_call_id": message.tool_call_id,
+            "created_at": message.created_at.isoformat()
+        }
+        list_of_dict_messages.append(m)
+
+    return list_of_dict_messages
+
+
+def convert_messages_to_json(messages: list[Messages]) -> list[dict]:
+    """ convert list of Messages objects to json string """
+    return [MessageSchema.model_validate(
+        m).model_dump(mode='json') for m in messages]

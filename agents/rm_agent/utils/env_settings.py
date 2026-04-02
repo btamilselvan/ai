@@ -11,3 +11,6 @@ class EnvSettings(BaseSettings):
     chroma_database: str
     hf_token: str
     database_url: str
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
