@@ -1,8 +1,8 @@
 import redis
-from utils.database import Messages, MessageSchema, convert_messages_to_json
+from utils.database import Message, MessageSchema, convert_messages_to_json
 
 
-def store_message_in_redis(r: redis.Redis, thread_id: str, message: Messages):
+def store_message_in_redis(r: redis.Redis, thread_id: str, message: Message):
     """ store message in redis """
     result = None
     if (r.exists(thread_id)):
@@ -18,7 +18,7 @@ def store_message_in_redis(r: redis.Redis, thread_id: str, message: Messages):
     return result
 
 
-def store_messages_in_redis(r: redis.Redis, thread_id: str, messages: list[Messages]):
+def store_messages_in_redis(r: redis.Redis, thread_id: str, messages: list[Message]):
     """ store message in redis """
 
     print(f"storing messages in redis for thread_id: {thread_id} with messages: {messages}")

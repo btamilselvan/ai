@@ -85,16 +85,22 @@ class RecipeManagerAgent():
             print(f"An error occurred: {e}")
             return None
 
-    async def orchestrate(self, chat_request: ChatRequest, toolname_servername_map: dict, mcp_session_map: dict):
-
-        # step 5 - persist response
+    async def orchestrate(self, chat_request: ChatRequest, history: list, toolname_servername_map: dict, mcp_session_map: dict):
 
         try:
             # step 1 - Retrieve data from Chroma DB (vector store) - provide context
             # print("executing step 1...")
-            context = self.__get_context_from_database(chat_request.message)
+            context = self.__get_context_from_database(
+                chat_request.message) or ""
 
-            messages = [{"role": "user", "content": chat_request.message}]
+            length_of_history = len(history)
+
+            print(f"length of history: {length_of_history}")
+
+            # print(f"history {history}")
+            # combine history and new messages for processing in the orchestration loop
+            messages = history + \
+                [{"role": "user", "content": chat_request.message}]
 
             loop_count = 0
 
@@ -103,15 +109,15 @@ class RecipeManagerAgent():
                 loop_count += 1
 
                 # step 2 - call LLM
+                # pass the context and the user query to the LLM and get a response
                 llm_response = self.__call_llm(context, messages)
-                # print(f"llm response: {llm_response}")
+                print(f"llm response: {llm_response}")
 
                 # step 3 - check if tool calls are present in response
                 tool_calls = self.__get_tool_calls(llm_response)
 
                 if (len(tool_calls) > 0):
                     # step 4 - execute tool calls and send back to LLM (repeat for all tool calls)
-
                     messages.append(
                         {"role": "assistant", "content": llm_response.choices[0].message.content, "tool_calls": tool_calls})
 
@@ -121,25 +127,28 @@ class RecipeManagerAgent():
                             tool.function.name)
                         mcp_session: ClientSession = mcp_session_map.get(
                             server_name)
-                        
+
                         tool_response = await mcp_session.call_tool(tool.function.name, json.loads(tool.function.arguments))
-                        
+
                         # print(f"tool response: {tool_response}")
-                        
-                        if tool_response.content:
-                            messages.append(
-                                {"role": "tool", "content": tool_response.content[0].text,
-                                 "name": tool.function.name,
-                                 "tool_call_id": tool.id})
-                        else:
-                            messages.append(
-                                {"role": "tool", "content": "", "name": tool.function.name, "tool_call_id": tool.id})
+
+                        tool_response_content_text = tool_response.content[
+                            0].text if tool_response.content else ""
+
+                        # add tool response to the messages to be sent back to the LLM for the next iteration of the loop
+                        messages.append(
+                            {"role": "tool", "content": tool_response_content_text, "tool_calls": [tool], "tool_call_id": tool.id})
                 else:
                     print("no tool calls detected, returning response...")
-                    # print(f"final messages: {messages}")
+                    # print(f"final messages: {new_messages}")
                     messages.append(
                         {"role": "assistant", "content": llm_response.choices[0].message.content, "tool_calls": tool_calls})
-                    return messages
+                    # return the new messages excluding the history messages
+                    return messages[length_of_history:]
+            # max tool calls reached, returning response with a warning about max tool calls reached
+            messages.append(
+                {"role": "assistant", "content": "Max tool calls reached. Returning response without executing further tool calls.", "tool_calls": []})
+            return messages[length_of_history:]
         except Exception as e:
             print(f"An error occurred: {e}")
             traceback.print_exc()

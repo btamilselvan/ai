@@ -7,8 +7,7 @@ from utils.resource_registry import ResourceRegistry
 import os
 from utils.env_settings import EnvSettings
 from utils.rm_agent import RecipeManagerAgent
-from utils.database import save_messages
-from utils.redis_store import store_messages_in_redis
+from utils.database import save_messages, get_messages_by_thread_id_from_redis
 
 load_dotenv()
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -87,33 +86,28 @@ async def chat(thread_id: str, data: ChatRequest, request: Request, background_t
     # always send the request to the main agent
     resource_registry: ResourceRegistry = request.app.state.resources
     client: RecipeManagerAgent = resource_registry.ai_clients["main_agent"]
-    messages = await client.orchestrate(data, mcp_session_map=resource_registry.mcp_sessions,
+    history = get_messages_by_thread_id_from_redis(resource_registry.redis_client, thread_id) or []
+    
+    # print(f"history {history}")
+    
+    new_messages = await client.orchestrate(data, history=history, mcp_session_map=resource_registry.mcp_sessions,
                                         toolname_servername_map=resource_registry.toolname_servername_map)
-    # print(messages)
-    if not messages:
+    print(new_messages)
+    if not new_messages:
         return {"error": "failed to get response from agent"}
 
     # summarize the messages
     # persist messages to the long term and short term memory stores (database and redis)
     _persist_messages(resource_registry.async_session, resource_registry.redis_client, thread_id,
-                      background_tasks, messages)
+                      background_tasks, new_messages)
 
-    # persist messages to redis for quick retrieval
-    # _persist_messages_to_redis(
-    #     resource_registry.redis_client, thread_id, messages)
-
-    return {"message": messages[-1]["content"]}
+    return {"message": new_messages[-1]["content"]}
 
 
 def _persist_messages(async_sessionmaker, r, thread_id: str, background_tasks: BackgroundTasks, messages: list):
     """ persist messages to database """
     background_tasks.add_task(
         save_messages, async_sessionmaker, r, thread_id, messages)
-
-
-def _persist_messages_to_redis(r, thread_id: str, messages: list):
-    """ persist messages to redis """
-    store_messages_in_redis(r, thread_id, messages)
 
 
 if __name__ == "__main__":
