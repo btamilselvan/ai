@@ -1,3 +1,5 @@
+# used only for local testing of database commands and data structure for storing conversation messages in the database. not used in production code.
+
 import sqlalchemy
 from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, TEXT, TIMESTAMP, func
 from sqlalchemy.orm import Session, DeclarativeBase, Mapped, mapped_column

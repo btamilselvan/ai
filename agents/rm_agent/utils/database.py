@@ -1,18 +1,16 @@
-import os
 from typing import Optional
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession, AsyncAttrs
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy import insert, select, Integer, String, TEXT, TIMESTAMP, func, JSON
-from sqlalchemy.orm import DeclarativeBase, Session, Mapped, mapped_column
+from sqlalchemy import select, Integer, String, TEXT, TIMESTAMP, func, JSON
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 import uuid
-import json
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime
 import redis
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Base(AsyncAttrs, DeclarativeBase):
@@ -62,7 +60,7 @@ def _convert_to_messages(thread_id, messages: list[dict]) -> list[Message]:
 
     list_of_messages = []
     for message in messages:
-        # print(f"converting message to Message object: {message}")
+        # logger.debug("converting message to Message object: %s", message)
         m = Message()
         m.thread_id = thread_id
         m.role = message["role"]
@@ -94,7 +92,7 @@ def _convert_to_messages(thread_id, messages: list[dict]) -> list[Message]:
     return list_of_messages
 
 
-async def save_messages(async_sessionmaker: async_sessionmaker[AsyncSession], r: redis.Redis, thread_id: str, messages: list):
+async def save_messages_to_pg(async_sessionmaker: async_sessionmaker[AsyncSession], thread_id: str, messages: list):
     """ save messages to database """
 
     messages_to_save = _convert_to_messages(thread_id, messages)
@@ -102,22 +100,55 @@ async def save_messages(async_sessionmaker: async_sessionmaker[AsyncSession], r:
         async with session.begin():
             session.add_all(messages_to_save)
         await session.commit()
-    print(f"messages saved to database for thread_id: {thread_id}")
-    _save_messages_to_redis(r, thread_id, messages_to_save)
-    return messages
+    logger.debug("messages saved to database for thread_id: %s", thread_id)
+
+    return messages_to_save
 
 
-def _save_messages_to_redis(r, thread_id: str, messages: list):
+def get_messages_to_summarize(r: redis.Redis, thread_id: str, summary_threshold: int, num_messages_summarize: int):
+    """ summarize messages for a given thread id and save the summary to the database and redis.
+    summarize when the total number of messages in the conversation thread exceeds a certain threshold (e.g. 10 messages), 
+    and include the most recent assistant message in the messages to be summarized, as that would likely contain the most relevant information for summarization.
+    """
+    # get messages for the thread id from redis
+    messages = get_messages_by_thread_id_from_redis(r, thread_id)
+    if not messages:
+        logger.info(
+            "no messages found in redis for thread_id %s, skipping summarization", thread_id)
+        return
+    messages_to_summarize = []
+    # fetch first 5 message for summarization
+    # make sure include the most recent assistant message in the messages to be summarized, as that would likely contain the most relevant information for summarization
+    if len(messages) >= summary_threshold:
+        index = 0
+        while index < len(messages):
+
+            messages_to_summarize.append(messages[index])
+
+            index += 1
+            if len(messages_to_summarize) >= num_messages_summarize and messages_to_summarize[-1]["role"] == "user":
+                messages_to_summarize.remove(messages_to_summarize[-1])
+                return messages_to_summarize
+    else:
+        logger.debug(
+            "not enough messages to summarize for thread_id %s, skipping summarization", thread_id)
+    return messages_to_summarize
+
+
+def save_messages_to_redis(r, thread_id: str, messages: list, overwrite: bool = False, convert_to_json: bool = True):
     """ save messages to redis """
     # convert list of Messages objects to list of dict messages
-    # print(f"converting messages to json for redis storage: {messages}")
+    # logger.debug("converting messages to json for redis storage: %s", messages)
     # json_messages = convert_messages_to_json(_convert_to_messages(thread_id, messages))
-    json_messages = convert_messages_to_json(messages)
+    json_messages = messages
 
-    # print(f"json messages to be stored in redis: {json_messages}")
+    if convert_to_json:
+        json_messages = convert_messages_to_json(messages)
+
+    # logger.debug(f"json messages to be stored in redis: {json_messages}")
 
     result = None
-    if (r.exists(thread_id)):
+    if not overwrite and r.exists(thread_id):
         # if the thread already exists, we want to append the message to the existing list of messages for that thread.
         # unpack the list of json messages so that each message is appended as a separate element in the redis list
         result = r.json().arrappend(
@@ -126,21 +157,17 @@ def _save_messages_to_redis(r, thread_id: str, messages: list):
         # if the thread does not exist, we want to create a new list of messages for that thread and add the message to that list
         result = r.json().set(thread_id, "$", json_messages)
 
-    print(f"result of storing message in redis: {result}")
+    logger.debug("result of storing message in redis: %s", result)
     return result
 
 
-# async def save_message(async_sessionmaker, thread_id: str, role: str,
-#                        content: Optional[str] = None, summary: Optional[str] = None,
-#                        tool: Optional[str] = None, tool_call_id: Optional[str] = None):
-#     """ save message to database """
-#     print(
-#         f"saving message to database with thread_id: {thread_id}, role: {role}, message: {content}, summary: {summary}, tool: {tool}, tool_call_id: {tool_call_id}")
-#     async with async_sessionmaker() as session:
-#         async with session.begin():
-#             session.add(Messages(thread_id=thread_id, role=role, message=content, summary=summary,
-#                         tool=tool, tool_call_id=tool_call_id))
-#         await session.commit()
+def add_summary_to_redis(r, thread_id: str, summary: Message, num_messages_to_replace):
+    logger.debug("add summary to redis [%s]", summary)
+    available_messages = get_messages_by_thread_id_from_redis(r, thread_id)
+    updated_messages = available_messages[num_messages_to_replace:]
+    updated_messages.insert(0, __convert_message_to_json(summary))
+    save_messages_to_redis(r, thread_id, updated_messages,
+                           overwrite=True, convert_to_json=False)
 
 
 async def get_messages_by_thread_id(async_sessionmaker, thread_id: str):
@@ -177,13 +204,18 @@ def convert_messages_to_json(messages: list[Message]) -> list[dict]:
         m).model_dump(mode='json') for m in messages]
 
 
+def __convert_message_to_json(message: Message) -> dict:
+    """ convert list of Message objects to json string """
+    return MessageSchema.model_validate(message).model_dump(mode='json')
+
+
 def get_messages_by_thread_id_from_redis(r: redis.Redis, thread_id: str):
     """ get messages by thread id from redis """
     if r.exists(thread_id):
         messages = r.json().get(thread_id, "$")
-        print(
-            f"messages retrieved from redis for thread_id {thread_id}: {messages}")
+        logger.debug(
+            "messages retrieved from redis for thread_id %s: %s", thread_id, messages)
         return messages[0] if messages else []
     else:
-        print(f"no messages found in redis for thread_id {thread_id}")
+        logger.debug("no messages found in redis for thread_id %s", thread_id)
         return None

@@ -6,6 +6,10 @@ from openai import OpenAI
 from utils.rm_agent import RecipeManagerAgent
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 import redis
+import logging
+from utils.agents import SummarizationAgent
+
+logger = logging.getLogger(__name__)
 
 
 class ResourceRegistry():
@@ -30,11 +34,11 @@ class ResourceRegistry():
 
     def create_database_engine(self, database_url):
         """ create database engine and add to registry """
-        print(f"creating database engine with url: {database_url}")
+        logger.info("creating database engine with url: %s", database_url)
         engine = create_async_engine(url=database_url, echo=False)
         async_session = async_sessionmaker(engine, expire_on_commit=False)
         self.async_session = async_session
-        print(f"database connection ...{async_session}...")
+        logger.info("database connection ...%s...", async_session)
 
     async def dispose_database_engine(self):
         """ dispose database engine """
@@ -44,17 +48,17 @@ class ResourceRegistry():
 
     async def setup_mcp_client(self, name, url):
         """ setup mcp client and add to registry """
-        # print(f"Setting up MCP client: {name} at {url}")
+        # logger.info(f"Setting up MCP client: {name} at {url}")
         read, write = await self._stack.enter_async_context(sse_client(url=url))
         session = await self._stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
         self.mcp_sessions[name] = session
 
-        print(f"MCP client and sessions initialized: {name} at {url}")
+        logger.info("MCP client and sessions initialized: %s at %s", name, url)
         # load tools
         tools = await self.__load_tools(name, session)
         self.tools_map[name] = tools
-        # print(f"tools map {self.tools_map}")
+        # logger.info("tools map %s", self.tools_map)
 
     async def __load_tools(self, server_name, session: ClientSession):
         """ load tools from mcp session """
@@ -88,11 +92,15 @@ class ResourceRegistry():
     def setup_ai_client(self, name, client, model, tools: list = []):
         """ setup generic ai client and add to registry """
         if "main_agent" == name:
-            rm__agent = RecipeManagerAgent(
+            rm_agent = RecipeManagerAgent(
                 client=client, model=model, tools=tools)
-            self.ai_clients[name] = rm__agent
+            self.ai_clients[name] = rm_agent
+        elif "summarization_agent" == name:
+            summarization_agent = SummarizationAgent(
+                client=client, model=model)
+            self.ai_clients[name] = summarization_agent
 
-        print(f"AI client initialized with tools: {tools}")
+        logger.info("AI clients initialized with tools: %s", tools)
 
     async def cleanup(self):
         """ cleanup all clients """

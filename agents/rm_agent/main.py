@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
 import uvicorn
 import datetime
 from utils.models import ChatRequest
@@ -7,29 +7,46 @@ from utils.resource_registry import ResourceRegistry
 import os
 from utils.env_settings import EnvSettings
 from utils.rm_agent import RecipeManagerAgent
-from utils.database import save_messages, get_messages_by_thread_id_from_redis
+from utils.database import get_messages_by_thread_id_from_redis
+from redis import Redis
+import logging
+from utils.background_task import run_background_tasks
 
 load_dotenv()
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 settings = EnvSettings()
+
+
+logging.basicConfig(
+        level=logging.INFO,
+        #include thread id
+        format="%(asctime)s [%(levelname)s] [Thread-%(thread)d] %(message)s",
+        handlers=[
+            logging.StreamHandler()  # log to console
+        ]
+    )
+logger = logging.getLogger(__name__)
 
 
 async def lifespan(app: FastAPI):
     """ initialize singleton resources (mcp clients, ai clients, etc.) """
 
-    print("server startup initiated...")
+    # print("server startup initiated...")
+    logger.info("server startup initiated...")
 
-    print(f"mcp servers : {settings.mcp_servers}")
+    # print(f"mcp servers : {settings.mcp_servers}")
+    logger.info("mcp servers %s", settings.mcp_servers)
 
     resource_registry = ResourceRegistry()
+    
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
     try:
-        print("trying to connect to mcp server(s)...")
+        logger.info("trying to connect to mcp server(s)...")
 
         # setup mcp clients and load tools
         for name, url in settings.mcp_servers.items():
-            print(f"connecting to mcp server {name} at {url}...")
+            logger.info("connecting to mcp server %s at %s...", name, url)
             await resource_registry.setup_mcp_client(name, url)
 
         # setup openai client
@@ -43,7 +60,7 @@ async def lifespan(app: FastAPI):
 
         # setup ai clients
         for name, model in settings.agents.items():
-            print(f"setting up ai agent {name} with model {model}...")
+            logger.debug("setting up ai agent %s with model %s...", name, model)
             resource_registry.setup_ai_client(
                 name, resource_registry.openai_client, model, tools=all_tools)
 
@@ -55,15 +72,16 @@ async def lifespan(app: FastAPI):
             host=settings.redis_host, port=settings.redis_port, db=settings.redis_db)
 
         app.state.resources = resource_registry
-        print("server startup completed...")
+        logger.info("server startup completed...")
 
         yield
-        print("server shutdown initiated...")
+        logger.info("server shutdown initiated...")
         await resource_registry.dispose_database_engine()
-        print("server shutdown completed...")
+        logger.info("server shutdown completed...")
 
     except Exception as e:
-        print(f"error setting up resource registry : {e}")
+        logger.error(f"error setting up resource registry : {e}")
+        raise
     finally:
         await resource_registry.cleanup()
 
@@ -73,41 +91,59 @@ app = FastAPI(title="RM AI Agent Server", lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    print("Server is healthy")
+    logger.info("Server is healthy")
     return f"server is healthy current time is {datetime.datetime.now()}"
 
 
-@app.post("/chat/{thread_id}")
+@app.post("/chat/{thread_id}", responses={
+    429: {"description": "Another request is being processed for this thread"},
+    500: {"description": "Error processing the request"}
+})
 async def chat(thread_id: str, data: ChatRequest, request: Request, background_tasks: BackgroundTasks):
-    print(f"chat function called with {data}")
+    logger.info("chat function called with thread id: %s", thread_id)
 
-    # load messages for the current conversation thread
-
-    # always send the request to the main agent
     resource_registry: ResourceRegistry = request.app.state.resources
-    client: RecipeManagerAgent = resource_registry.ai_clients["main_agent"]
-    history = get_messages_by_thread_id_from_redis(resource_registry.redis_client, thread_id) or []
-    
-    # print(f"history {history}")
-    
-    new_messages = await client.orchestrate(data, history=history, mcp_session_map=resource_registry.mcp_sessions,
-                                        toolname_servername_map=resource_registry.toolname_servername_map)
-    print(new_messages)
-    if not new_messages:
-        return {"error": "failed to get response from agent"}
 
-    # summarize the messages
-    # persist messages to the long term and short term memory stores (database and redis)
-    _persist_messages(resource_registry.async_session, resource_registry.redis_client, thread_id,
-                      background_tasks, new_messages)
+    # lock the thread
+    lock_key = f"thread_lock:{thread_id}"
+    r: Redis = resource_registry.redis_client
+    # try to acquire lock, if lock is acquired proceed with processing the request, else return an error response indicating that another request is being processed for this thread
+    if r.set(lock_key, "processing", ex=60, nx=True):
 
-    return {"message": new_messages[-1]["content"]}
+        try:
+            logger.info("acquired lock for thread %s", thread_id)
+            # always send the request to the main agent
+            client: RecipeManagerAgent = resource_registry.ai_clients["main_agent"]
 
+            # load messages for the current conversation thread
+            history = get_messages_by_thread_id_from_redis(
+                resource_registry.redis_client, thread_id) or []
 
-def _persist_messages(async_sessionmaker, r, thread_id: str, background_tasks: BackgroundTasks, messages: list):
-    """ persist messages to database """
-    background_tasks.add_task(
-        save_messages, async_sessionmaker, r, thread_id, messages)
+            # logger.debug(f"history {history}")
+
+            new_messages = await client.orchestrate(data, history=history, mcp_session_map=resource_registry.mcp_sessions,
+                                                    toolname_servername_map=resource_registry.toolname_servername_map)
+            # logger.debug(f"new messages {new_messages}")
+            if not new_messages:
+                return {"error": "failed to get response from agent"}
+
+            # summarize the messages
+            # persist messages to the long term and short term memory stores (database and redis)
+            # _persist_messages(resource_registry.async_session, resource_registry.redis_client, thread_id,
+            #                   background_tasks, new_messages)
+            background_tasks.add_task(run_background_tasks, resource_registry, thread_id, new_messages)
+
+            return {"message": new_messages[-1]["content"]}
+        except Exception as e:
+            logger.error("error in chat endpoint: %s", e)
+            raise HTTPException(status_code=500, detail=f"error processing the request: {e}")
+        finally:
+            r.delete(lock_key)
+            logger.info("released lock for thread %s", thread_id)
+    else:
+        logger.warning(
+            f"failed to acquire lock for thread {thread_id}, another request is being processed for this thread")
+        raise HTTPException(status_code=429, detail="another request is being processed for this thread, please try again later")
 
 
 if __name__ == "__main__":
