@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 import redis
 import logging
 from agents.summarization_agent import SummarizationAgent
-from agents.rm_agent import RecipeManagerAgent
+from agents.supervisor import SupervisorAgent
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ class ResourceRegistry():
     def setup_ai_client(self, name, client, model, tools: list = []):
         """ setup generic ai client and add to registry """
         if "main_agent" == name:
-            rm_agent = RecipeManagerAgent(
+            rm_agent = SupervisorAgent(
                 client=client, model=model, tools=tools)
             self.ai_clients[name] = rm_agent
         elif "summarization_agent" == name:

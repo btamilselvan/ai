@@ -1,5 +1,5 @@
 import redis
-from utils.database import Message, MessageSchema, convert_messages_to_json
+from datastore.database import Message, MessageSchema, convert_messages_to_json
 
 
 def store_message_in_redis(r: redis.Redis, thread_id: str, message: Message):

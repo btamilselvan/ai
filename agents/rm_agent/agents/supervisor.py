@@ -14,7 +14,7 @@ from agents.base import BaseAgent
 logger = logging.getLogger(__name__)
 
 
-class RecipeManagerAgent(BaseAgent):
+class SupervisorAgent(BaseAgent):
 
     SEARCH_THRESHOLD = 0.9
 

@@ -6,8 +6,8 @@ from utils.models import ChatRequest
 from utils.resource_registry import ResourceRegistry
 import os
 from utils.env_settings import EnvSettings
-from agents.rm_agent import RecipeManagerAgent
-from utils.database import get_messages_by_thread_id_from_redis
+from agents.supervisor import SupervisorAgent
+from datastore.database import get_messages_by_thread_id_from_redis
 from redis import Redis
 import logging
 from utils.background_task import run_background_tasks
@@ -113,7 +113,7 @@ async def chat(thread_id: str, data: ChatRequest, request: Request, background_t
         try:
             logger.info("acquired lock for thread %s", thread_id)
             # always send the request to the main agent
-            client: RecipeManagerAgent = resource_registry.ai_clients["main_agent"]
+            client: SupervisorAgent = resource_registry.ai_clients["main_agent"]
 
             # load messages for the current conversation thread
             history = get_messages_by_thread_id_from_redis(
