@@ -3,11 +3,11 @@ from mcp import ClientSession
 from mcp.client.sse import sse_client
 from typing import Dict
 from openai import OpenAI
-from utils.rm_agent import RecipeManagerAgent
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 import redis
 import logging
-from utils.summarization_agent import SummarizationAgent
+from agents.summarization_agent import SummarizationAgent
+from agents.rm_agent import RecipeManagerAgent
 
 logger = logging.getLogger(__name__)
 

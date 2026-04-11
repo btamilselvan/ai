@@ -1,5 +1,5 @@
 from utils.database import save_messages_to_pg, get_messages_to_summarize, save_messages_to_redis, add_summary_to_redis
-from utils.summarization_agent import SummarizationAgent
+from agents.summarization_agent import SummarizationAgent
 from utils.resource_registry import ResourceRegistry
 import logging
 

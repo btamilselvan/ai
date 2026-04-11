@@ -1,4 +1,4 @@
-from utils.base import BaseAgent
+from agents.base import BaseAgent
 from openai import OpenAI
 import logging
 

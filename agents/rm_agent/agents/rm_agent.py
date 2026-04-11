@@ -9,7 +9,7 @@ from chromadb import Search, K, Knn
 from mcp import ClientSession
 import json
 import logging
-from utils.base import BaseAgent
+from agents.base import BaseAgent
 
 logger = logging.getLogger(__name__)
 

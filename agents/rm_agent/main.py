@@ -6,7 +6,7 @@ from utils.models import ChatRequest
 from utils.resource_registry import ResourceRegistry
 import os
 from utils.env_settings import EnvSettings
-from utils.rm_agent import RecipeManagerAgent
+from agents.rm_agent import RecipeManagerAgent
 from utils.database import get_messages_by_thread_id_from_redis
 from redis import Redis
 import logging
