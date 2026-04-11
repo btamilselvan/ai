@@ -7,7 +7,7 @@ from utils.rm_agent import RecipeManagerAgent
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 import redis
 import logging
-from utils.agents import SummarizationAgent
+from utils.summarization_agent import SummarizationAgent
 
 logger = logging.getLogger(__name__)
 
