@@ -91,13 +91,13 @@ class ResourceRegistry():
 
     def setup_ai_client(self, name, client, model, tools: list = []):
         """ setup generic ai client and add to registry """
-        if "main_agent" == name:
+        if "supervisor_agent" == name:
             rm_agent = SupervisorAgent(
-                client=client, model=model, tools=tools)
+                client=client, model=model, tools=tools, toolname_servername_map=self.toolname_servername_map)
             self.ai_clients[name] = rm_agent
         elif "summarization_agent" == name:
             summarization_agent = SummarizationAgent(
-                client=client, model=model)
+                client=client, model=model, toolname_servername_map={})
             self.ai_clients[name] = summarization_agent
 
         logger.info("AI clients initialized with tools: %s", tools)

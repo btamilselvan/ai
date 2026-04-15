@@ -2,15 +2,16 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
 import uvicorn
 import datetime
-from utils.models import ChatRequest
+from utils.models import ChatRequest, AppState, ConversationModel
 from utils.resource_registry import ResourceRegistry
 import os
 from utils.env_settings import EnvSettings
 from agents.supervisor import SupervisorAgent
-from datastore.database import get_messages_by_thread_id_from_redis
+from datastore.database import load_appstate_from_redis
 from redis import Redis
 import logging
 from utils.background_task import run_background_tasks
+import traceback
 
 load_dotenv()
 
@@ -18,13 +19,13 @@ settings = EnvSettings()
 
 
 logging.basicConfig(
-        level=logging.INFO,
-        #include thread id
-        format="%(asctime)s [%(levelname)s] [Thread-%(thread)d] %(message)s",
-        handlers=[
-            logging.StreamHandler()  # log to console
-        ]
-    )
+    level=logging.DEBUG,
+    # include thread id
+    format="%(asctime)s [%(levelname)s] [%(filename)s %(lineno)d] [Thread-%(thread)d] %(message)s",
+    handlers=[
+        logging.StreamHandler()  # log to console
+    ]
+)
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +39,7 @@ async def lifespan(app: FastAPI):
     logger.info("mcp servers %s", settings.mcp_servers)
 
     resource_registry = ResourceRegistry()
-    
+
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
     try:
@@ -60,7 +61,8 @@ async def lifespan(app: FastAPI):
 
         # setup ai clients
         for name, model in settings.agents.items():
-            logger.debug("setting up ai agent %s with model %s...", name, model)
+            logger.debug(
+                "setting up ai agent %s with model %s...", name, model)
             resource_registry.setup_ai_client(
                 name, resource_registry.openai_client, model, tools=all_tools)
 
@@ -81,6 +83,7 @@ async def lifespan(app: FastAPI):
 
     except Exception as e:
         logger.error(f"error setting up resource registry : {e}")
+        traceback.print_exc()
         raise
     finally:
         await resource_registry.cleanup()
@@ -113,37 +116,67 @@ async def chat(thread_id: str, data: ChatRequest, request: Request, background_t
         try:
             logger.info("acquired lock for thread %s", thread_id)
             # always send the request to the main agent
-            client: SupervisorAgent = resource_registry.ai_clients["main_agent"]
+            client: SupervisorAgent = resource_registry.ai_clients["supervisor_agent"]
 
-            # load messages for the current conversation thread
-            history = get_messages_by_thread_id_from_redis(
-                resource_registry.redis_client, thread_id) or []
+            original_state = __load_appstate(thread_id, r, data)
+            working_state = original_state.model_copy(deep=True)
 
-            # logger.debug(f"history {history}")
+            working_state = await client.orchestrate(working_state,
+                                                         mcp_session_map=resource_registry.mcp_sessions)
 
-            new_messages = await client.orchestrate(data, history=history, mcp_session_map=resource_registry.mcp_sessions,
-                                                    toolname_servername_map=resource_registry.toolname_servername_map)
-            # logger.debug(f"new messages {new_messages}")
-            if not new_messages:
+            messages_count = len(working_state.messages)
+            working_state.messages_count = messages_count
+
+            logger.debug(f"updated appstate {working_state}")
+
+            logger.debug("old messages count %d, new messages count %d",
+                         original_state.messages_count, working_state.messages_count)
+
+            if messages_count <= original_state.messages_count:
                 return {"error": "failed to get response from agent"}
 
             # summarize the messages
             # persist messages to the long term and short term memory stores (database and redis)
-            # _persist_messages(resource_registry.async_session, resource_registry.redis_client, thread_id,
-            #                   background_tasks, new_messages)
-            background_tasks.add_task(run_background_tasks, resource_registry, thread_id, new_messages)
+            background_tasks.add_task(
+                run_background_tasks, resource_registry, working_state)
 
-            return {"message": new_messages[-1]["content"]}
+            return {"message": working_state.messages[-1].content}
         except Exception as e:
             logger.error("error in chat endpoint: %s", e)
-            raise HTTPException(status_code=500, detail=f"error processing the request: {e}")
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500, detail=f"error processing the request: {e}")
         finally:
             r.delete(lock_key)
             logger.info("released lock for thread %s", thread_id)
     else:
         logger.warning(
             f"failed to acquire lock for thread {thread_id}, another request is being processed for this thread")
-        raise HTTPException(status_code=429, detail="another request is being processed for this thread, please try again later")
+        raise HTTPException(
+            status_code=429, detail="another request is being processed for this thread, please try again later")
+
+
+def __load_appstate(thread_id: str, r: Redis, data: ChatRequest) -> AppState:
+
+    app_state = load_appstate_from_redis(r, thread_id)
+
+    history = app_state.messages or []
+    messages_count = len(history)
+
+    logger.debug("length of history: %s", messages_count)
+
+    user_message = ConversationModel(thread_id=thread_id,
+                                     role="user", content=data.message)
+
+    app_state.messages_count = messages_count
+    app_state.user_message = data.message
+
+    messages = history + [user_message]
+    app_state.messages = messages
+    app_state.current_agent_name = "supervisor_agent"
+
+    logger.debug(f"history {messages}")
+    return app_state
 
 
 if __name__ == "__main__":

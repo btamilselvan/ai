@@ -1,29 +1,76 @@
 import logging
 from openai import OpenAI
+from mcp import ClientSession
+import json
+from utils.models import AppState, ConversationModel, ToolCall, ToolFunctionInfo
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
 
 class BaseAgent:
-    def __init__(self, client: OpenAI, model, temperature=1.6, tools: list = None, max_tokens=4096):
+    def __init__(self, client: OpenAI, model, toolname_servername_map, temperature=1.6, tools: list = None, max_tokens=4096):
         logger.info("RM agent initialized...")
         self.client = client
         self.model = model
+        self.toolname_servername_map = toolname_servername_map
         self.temperature = temperature
         self.tools = tools
         self.max_tokens = max_tokens
 
-    def call_llm(self, context: str, messages: list):
-        # logger.debug(f"messages: {messages}")
+    def __collect_tool_calls(self, response):
+        if response.choices and response.choices[0].message.tool_calls:
+            tool_calls: list[ToolCall] = []
+            for tool_call in response.choices[0].message.tool_calls:
+
+                tool_calls.append(ToolCall(type=tool_call.type,
+                                           id=tool_call.id,
+                                           function=ToolFunctionInfo(
+                                               name=tool_call.function.name,
+                                               arguments=tool_call.function.arguments
+                                           )))
+            return tool_calls
+
+        return None
+
+    async def __invoke_tool(self, mcp_session: ClientSession, tool: ToolCall, thread_id):
+        tool_response = await mcp_session.call_tool(tool.function.name, json.loads(tool.function.arguments))
+        logger.debug("tool response: %s", tool_response)
+
+        tool_response_content_text = tool_response.content[0].text if tool_response.content else ""
+
+        # add tool response to the messages to be sent back to the LLM for the next iteration of the loop
+        # return {"role": "tool", "content": tool_response_content_text, "tool_calls": [tool], "tool_call_id": tool.id}
+        return ConversationModel(
+            thread_id=thread_id,
+            role="tool",
+            content=tool_response_content_text,
+            tool_calls=[tool],
+            tool_call_id=tool.id)
+
+    def __convert_llm_response_to_model(self, response) -> ConversationModel:
+
+        logger.debug("tool calls %s", self.__collect_tool_calls(response))
+
+        conv_model = ConversationModel(
+            role="assistant",
+            content=response.choices[0].message.content,
+            tool_calls=self.__collect_tool_calls(response)
+        )
+
+        return conv_model
+
+    def invoke_llm(self, context: str, appstate: AppState) -> AppState:
+        """ call the LLM with the context and the user message """
 
         prompt = self.SYSTEM_PROMPT.format(context=context)
 
         # add system prompt at index 0
         messages = [
             {"role": "system", "content": prompt}
-        ] + messages
-        
-        logger.debug("calling LLM with messages: %s", messages)
+        ] + [msg.model_dump(exclude={"thread_id", "summary", "id", "created_at"}) for msg in appstate.messages]
+
+        logger.info("calling LLM with messages: %s", messages)
 
         try:
 
@@ -37,8 +84,35 @@ class BaseAgent:
             )
             # for chunk in response:
             #     yield chunk
-            return response
+            logger.debug("LLM response received: %s",
+                         response.choices[0].message)
+            conv_model = self.__convert_llm_response_to_model(response)
+            conv_model.thread_id = appstate.thread_id
+
+            appstate.messages.append(conv_model)
+            return appstate
         except Exception as e:
             print(f"An error occurred: {e}")
-            return None
+            # retry??
+            raise
+            # return None
 
+    async def execute_tool_calls(self, toolname_servername_map: Dict[str, str], mcp_session_map, appstate: AppState) -> AppState:
+        """ execute the tool calls returned by the LLM """
+        
+        tool_responses = []
+        logger.debug("executing tool calls...")
+        for tool in appstate.messages[-1].tool_calls:
+            logger.info("executing tool call: %s", tool)
+
+            server_name = toolname_servername_map.get(
+                tool.function.name)
+            mcp_session: ClientSession = mcp_session_map.get(
+                server_name)
+
+            tool_response = await self.__invoke_tool(mcp_session, tool, appstate.thread_id)
+            # add tool response to the messages to be sent back to the LLM for the next iteration of the loop
+            tool_responses.append(tool_response)
+
+        appstate.messages.extend(tool_responses)
+        return appstate

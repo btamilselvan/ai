@@ -3,11 +3,9 @@ from sentence_transformers import SentenceTransformer
 import chromadb
 from chromadb.utils import embedding_functions
 from utils.env_settings import EnvSettings
-from utils.models import ChatRequest
+from utils.models import AppState, ConversationModel
 import traceback
 from chromadb import Search, K, Knn
-from mcp import ClientSession
-import json
 import logging
 from agents.base import BaseAgent
 
@@ -15,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class SupervisorAgent(BaseAgent):
+    
+    """ Superisor Agent that coordinates the workflow of the RM Agent """
 
     SEARCH_THRESHOLD = 0.9
 
@@ -75,8 +75,8 @@ class SupervisorAgent(BaseAgent):
     
     """
 
-    def __init__(self, client: OpenAI, model, temperature=1.6, tools: list = None, max_tokens=4096):
-        super().__init__(client, model, temperature, tools, max_tokens)
+    def __init__(self, client: OpenAI, model, toolname_servername_map, temperature=1.6, tools: list = None, max_tokens=4096,):
+        super().__init__(client, model, toolname_servername_map, temperature, tools, max_tokens)
         self.__init_chroma_collection()
         logger.info("RM agent initialized...")
 
@@ -94,76 +94,6 @@ class SupervisorAgent(BaseAgent):
             "rm_knowledge_collection_1")
         logger.info(
             "chroma collection initialized...%s", self.__collection.configuration_json)
-
-    async def orchestrate(self, chat_request: ChatRequest, history: list, toolname_servername_map: dict, mcp_session_map: dict):
-
-        try:
-            # step 1 - Retrieve data from Chroma DB (vector store) - provide context
-            # print("executing step 1...")
-            context = self.__get_context_from_database(
-                chat_request.message) or ""
-
-            length_of_history = len(history)
-
-            logger.debug("length of history: %s", length_of_history)
-
-            # logger.debug(f"history {history}")
-            # combine history and new messages for processing in the orchestration loop
-            messages = history + \
-                [{"role": "user", "content": chat_request.message}]
-
-            loop_count = 0
-
-            while loop_count < self.MAX_TOOL_CALLS_ALLOWED_PER_CONVERSATION:
-
-                loop_count += 1
-
-                # step 2 - call LLM
-                # pass the context and the user query to the LLM and get a response
-                llm_response = self.call_llm(context, messages)
-                logger.debug("llm response: %s", llm_response)
-
-                # step 3 - check if tool calls are present in response
-                tool_calls = self.__get_tool_calls(llm_response)
-
-                if (len(tool_calls) > 0):
-                    # step 4 - execute tool calls and send back to LLM (repeat for all tool calls)
-                    messages.append(
-                        {"role": "assistant", "content": llm_response.choices[0].message.content, "tool_calls": tool_calls})
-
-                    for tool in tool_calls:
-                        logger.debug("executing tool call: %s", tool)
-                        server_name = toolname_servername_map.get(
-                            tool.function.name)
-                        mcp_session: ClientSession = mcp_session_map.get(
-                            server_name)
-
-                        tool_response = await mcp_session.call_tool(tool.function.name, json.loads(tool.function.arguments))
-
-                        logger.debug("tool response: %s", tool_response)
-
-                        tool_response_content_text = tool_response.content[
-                            0].text if tool_response.content else ""
-
-                        # add tool response to the messages to be sent back to the LLM for the next iteration of the loop
-                        messages.append(
-                            {"role": "tool", "content": tool_response_content_text, "tool_calls": [tool], "tool_call_id": tool.id})
-                else:
-                    logger.debug(
-                        "no tool calls detected, returning response...")
-                    # logger.debug(f"final messages: {new_messages}")
-                    messages.append(
-                        {"role": "assistant", "content": llm_response.choices[0].message.content, "tool_calls": tool_calls})
-                    # return the new messages excluding the history messages
-                    return messages[length_of_history:]
-            # max tool calls reached, returning response with a warning about max tool calls reached
-            messages.append(
-                {"role": "assistant", "content": "Max tool calls reached. Returning response without executing further tool calls.", "tool_calls": []})
-            return messages[length_of_history:]
-        except Exception as e:
-            logger.error(f"An error occurred: {e}")
-            traceback.print_exc()
-            return None
 
     def __get_context_from_database(self, message):
         try:
@@ -195,7 +125,47 @@ class SupervisorAgent(BaseAgent):
             traceback.print_exc()
             return None
 
-    def __get_tool_calls(self, response):
-        if response.choices and response.choices[0].message.tool_calls:
-            return response.choices[0].message.tool_calls
-        return []
+    async def orchestrate(self, appstate: AppState, mcp_session_map: dict) -> AppState:
+        """ Orchestrate LLM calls, tools calls """
+        try:
+
+            # step 1 - Retrieve data from Chroma DB (vector store) - provide context
+            # print("executing step 1...")
+            context = self.__get_context_from_database(
+                appstate.user_message) or ""
+
+            loop_count = 0
+            graceful_exit = False
+
+            while loop_count < self.MAX_TOOL_CALLS_ALLOWED_PER_CONVERSATION:
+
+                loop_count += 1
+
+                # step 2 - call LLM
+                # pass the context and the user query to the LLM and get a response
+                appstate = self.invoke_llm(context, appstate)
+                logger.debug("llm response: %s", appstate.messages[-1])
+                logger.debug("appstate %s", appstate)
+
+                # step 3 - check if tool calls are present in response
+                if (appstate.messages[-1].tool_calls and len(appstate.messages[-1].tool_calls) > 0):
+                    # execute tool calls
+                    appstate = await self.execute_tool_calls(self.toolname_servername_map,
+                                                             mcp_session_map, appstate)
+                else:
+                    logger.debug(
+                        "no tool calls detected, returning response...")
+                    graceful_exit = True
+                    break
+
+            # max tool calls reached, returning response with a warning about max tool calls
+            if not graceful_exit:
+                appstate.messages.append(ConversationModel(thread_id=appstate.thread_id,
+                                                           role="assistant",
+                                                           content="Max tool calls reached. Returning response without executing further tool calls."))
+            logger.info("returning the LLM response...")
+            return appstate
+        except Exception as e:
+            logger.error(f"An error occurred: {e}")
+            traceback.print_exc()
+            return None
