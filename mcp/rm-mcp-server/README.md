@@ -1,2 +1,5 @@
 - use mcp inspector to access mcp server console.
 - npx @modelcontextprotocol/inspector python3 main.py
+
+#### References
+- https://gofastmcp.com/servers/middleware
