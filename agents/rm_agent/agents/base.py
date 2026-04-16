@@ -34,7 +34,8 @@ class BaseAgent:
         return None
 
     async def __invoke_tool(self, mcp_session: ClientSession, tool: ToolCall, thread_id):
-        tool_response = await mcp_session.call_tool(tool.function.name, json.loads(tool.function.arguments))
+        tool_response = await mcp_session.call_tool(tool.function.name, json.loads(tool.function.arguments), meta={
+            "thread_id": thread_id})
         logger.debug("tool response: %s", tool_response)
 
         tool_response_content_text = tool_response.content[0].text if tool_response.content else ""
@@ -99,7 +100,7 @@ class BaseAgent:
 
     async def execute_tool_calls(self, toolname_servername_map: Dict[str, str], mcp_session_map, appstate: AppState) -> AppState:
         """ execute the tool calls returned by the LLM """
-        
+
         tool_responses = []
         logger.debug("executing tool calls...")
         for tool in appstate.messages[-1].tool_calls:

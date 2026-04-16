@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
         # setup mcp clients and load tools
         for name, url in settings.mcp_servers.items():
             logger.info("connecting to mcp server %s at %s...", name, url)
-            await resource_registry.setup_mcp_client(name, url)
+            await resource_registry.setup_mcp_client(name, url, settings.mcp_server_api_key)
 
         # setup openai client
         resource_registry.setup_openai_client(

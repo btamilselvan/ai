@@ -84,7 +84,7 @@ async def __summarize_messages(resource_registry: ResourceRegistry, appstate: Ap
         agent: SummarizationAgent = resource_registry.ai_clients[AGENT_NAME]
 
         # call LLM to summarize messages
-        updated_appstate = agent.invoke_llm_new(context="", appstate=AppState(thread_id=appstate.thread_id,
+        updated_appstate = agent.invoke_llm(context="", appstate=AppState(thread_id=appstate.thread_id,
                                                                               messages=messages_to_summarize, current_agent_name=AGENT_NAME))
         llm_summary = updated_appstate.messages[-1]
 

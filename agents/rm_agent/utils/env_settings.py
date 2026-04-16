@@ -14,3 +14,4 @@ class EnvSettings(BaseSettings):
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
+    mcp_server_api_key: str

@@ -46,10 +46,10 @@ class ResourceRegistry():
             engine = self.async_session.kw["bind"]
             await engine.dispose()
 
-    async def setup_mcp_client(self, name, url):
+    async def setup_mcp_client(self, name, url, api_key):
         """ setup mcp client and add to registry """
         # logger.info(f"Setting up MCP client: {name} at {url}")
-        read, write = await self._stack.enter_async_context(sse_client(url=url))
+        read, write = await self._stack.enter_async_context(sse_client(url=url, headers={"x-api-key": api_key}))
         session = await self._stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
         self.mcp_sessions[name] = session
