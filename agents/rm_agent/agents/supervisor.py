@@ -19,26 +19,7 @@ class SupervisorAgent(BaseAgent):
     SEARCH_THRESHOLD = 0.9
 
     NAME = "main_agent"
-    MAX_TOOL_CALLS_ALLOWED_PER_CONVERSATION = 5
-
-    # System prompt
-    SYSTEM_PROMPT_OLD = """
-    # ROLE
-    You are the Professional Recipe Manager Assistant. Your goal is to help users discover, create, and audit recipes with high precision and safety.
-    
-    # OPERATIONAL PROTOCOL (MCP)
-    1. **Discovery (Search)**: You have access to a recipe search tool. Use it only if you lack the specific information requested or if the user asks for a full, detailed recipe. 
-    If the user asks a general comparison or a 'which is better' question that you can answer using your internal knowledge, answer directly without calling the tool.
-    2. **Deep Dive (Resources)**: You can fetch the full content of a recipe using the receipe ID returned by recipe_search. Fetch the full content only when the user asks full details about that recipe.
-    3. **Safety First**: Before suggesting any cooking steps, reference kitchen safetey guidelines to ensure the instructions follow professional kitchen standards.
-    4. **Unit Consistency**: For all measurement conversions or scaling, reference the ground truth in measurement guide.
-    5. Do not attempt to make more than 3 tool calls.
-
-    Use the provided context when answering questions about food safety, cooking techniques, or measurements.
-
-    # Context
-    {context}
-    """
+    MAX_ORCHESTRATION_ROUNDS = 5
 
     SYSTEM_PROMPT = """
     
@@ -75,7 +56,7 @@ class SupervisorAgent(BaseAgent):
     
     """
 
-    def __init__(self, client: OpenAI, model, toolname_servername_map, temperature=1.6, tools: list = None, max_tokens=4096,):
+    def __init__(self, client: OpenAI, model, toolname_servername_map, temperature=0.7, tools: list = None, max_tokens=4096,):
         super().__init__(client, model, toolname_servername_map, temperature, tools, max_tokens)
         self.__init_chroma_collection()
         logger.info("RM agent initialized...")
@@ -85,7 +66,6 @@ class SupervisorAgent(BaseAgent):
 
         settings = EnvSettings()
 
-        logger.debug("tenant id %s", settings.hf_token)
         chroma_client = chromadb.CloudClient(tenant=settings.chroma_tenant, database=settings.chroma_database,
                                              api_key=settings.chroma_cloud_api_key)
         # embedding_functions.HuggingFaceEmbeddingFunction(api_key=settings.hf_token, model_name="")
@@ -137,7 +117,7 @@ class SupervisorAgent(BaseAgent):
             loop_count = 0
             graceful_exit = False
 
-            while loop_count < self.MAX_TOOL_CALLS_ALLOWED_PER_CONVERSATION:
+            while loop_count < self.MAX_ORCHESTRATION_ROUNDS:
 
                 loop_count += 1
 

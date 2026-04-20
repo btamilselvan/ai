@@ -28,7 +28,7 @@ class Conversation(Base):
     thread_id: Mapped[UUID] = mapped_column(nullable=False)
     # role can be user, assistant or system
     role: Mapped[str] = mapped_column(
-        String(6), nullable=False, name="user_role")
+        String(20), nullable=False, name="user_role")
     # can be declared without mapped_column if the type can be inferred,
     # but adding mapped_column allows us to add additional constraints like nullable, default value etc
     content: Mapped[Optional[str]] = mapped_column(TEXT, name="message")

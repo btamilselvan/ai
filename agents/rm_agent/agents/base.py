@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from openai import OpenAI
 import json
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class BaseAgent:
-    def __init__(self, client: OpenAI, model, toolname_servername_map, temperature=1.6, tools: list = None, max_tokens=4096):
+    def __init__(self, client: OpenAI, model, toolname_servername_map, temperature=0.7, tools: list = None, max_tokens=4096):
         logger.info("RM agent initialized...")
         self.client = client
         self.model = model
@@ -109,21 +110,19 @@ class BaseAgent:
             # return None
 
     async def execute_tool_calls(self, toolname_servername_map: Dict[str, str], mcp_client_map, appstate: AppState) -> AppState:
-        """ execute the tool calls returned by the LLM """
+        """ execute the tool calls returned by the LLM concurrently """
 
-        tool_responses = []
         logger.debug("executing tool calls...")
-        for tool in appstate.messages[-1].tool_calls:
+
+        async def invoke(tool: ToolCall):
             logger.info("executing tool call: %s", tool)
+            server_name = toolname_servername_map.get(tool.function.name)
+            mcp_client: Client = mcp_client_map.get(server_name)
+            return await self.__invoke_tool(mcp_client, tool, appstate.thread_id)
 
-            server_name = toolname_servername_map.get(
-                tool.function.name)
-            mcp_client: Client = mcp_client_map.get(
-                server_name)
-
-            tool_response = await self.__invoke_tool(mcp_client, tool, appstate.thread_id)
-            # add tool response to the messages to be sent back to the LLM for the next iteration of the loop
-            tool_responses.append(tool_response)
+        tool_responses = await asyncio.gather(
+            *[invoke(tool) for tool in appstate.messages[-1].tool_calls]
+        )
 
         appstate.messages.extend(tool_responses)
         return appstate
