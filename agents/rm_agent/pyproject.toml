@@ -9,6 +9,7 @@ dependencies = [
     "asyncpg>=0.31.0",
     "chromadb>=1.5.5",
     "fastapi>=0.135.2",
+    "fastmcp>=3.2.4",
     "gunicorn>=25.3.0",
     "mcp>=1.26.0",
     "openai>=2.29.0",

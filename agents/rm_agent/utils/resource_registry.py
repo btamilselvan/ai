@@ -8,6 +8,9 @@ import redis
 import logging
 from agents.summarization_agent import SummarizationAgent
 from agents.supervisor import SupervisorAgent
+from fastmcp import Client
+from fastmcp.client.transports import SSETransport
+from mcp.types import Tool
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +24,8 @@ class ResourceRegistry():
     def __init__(self):
         # AsyncExitStack - a dynamic, asynchronous version of Try-with- in Java.
         self._stack = AsyncExitStack()
-        self.mcp_sessions: Dict[str, ClientSession] = {}
+        # self.mcp_sessions: Dict[str, ClientSession] = {}
+        self.mcp_clients: Dict[str, Client] = {}
         self.ai_clients: Dict[str, any] = {}
         self.tools_map: Dict[str, list] = {}
         self.toolname_servername_map: Dict[str, str] = {}
@@ -49,39 +53,46 @@ class ResourceRegistry():
     async def setup_mcp_client(self, name, url, api_key):
         """ setup mcp client and add to registry """
         # logger.info(f"Setting up MCP client: {name} at {url}")
-        read, write = await self._stack.enter_async_context(sse_client(url=url, headers={"x-api-key": api_key}))
-        session = await self._stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
-        self.mcp_sessions[name] = session
+
+        sse = SSETransport(url=url, headers={"x-api-key": api_key})
+        client = Client(transport=sse)
+        await self._stack.enter_async_context(client)
+        # await client.ping()
+
+        tools = await self.__load_tools(name, client)
+        logger.info("Tools loaded from %s: %s", name, tools)
+        self.tools_map[name] = tools
+        self.mcp_clients[name] = client
+
+        # read, write = await self._stack.enter_async_context(sse_client(url=url, headers={"x-api-key": api_key}))
+        # session = await self._stack.enter_async_context(ClientSession(read, write))
+        # await session.initialize()
+        # self.mcp_sessions[name] = session
 
         logger.info("MCP client and sessions initialized: %s at %s", name, url)
         # load tools
-        tools = await self.__load_tools(name, session)
-        self.tools_map[name] = tools
+        # tools = await self.__load_tools(name, session)
+        # self.tools_map[name] = tools
         # logger.info("tools map %s", self.tools_map)
 
-    async def __load_tools(self, server_name, session: ClientSession):
+    async def __load_tools(self, server_name, client: Client):
         """ load tools from mcp session """
 
-        tools = await session.list_tools()
+        tools: list[Tool] = await client.list_tools()
 
         all_tools = []
 
         for tool in tools:
-            if isinstance(tool[1], list):
-                # print(f"Multiple tools found: {tool[1]}")
-                for t in tool[1]:
-                    # print(f"Tool: {t}")
-                    self.toolname_servername_map[t.name] = server_name
-                    # open ai chat expects the tool format be in the below format
-                    all_tools.append({
-                        "type": "function",
+
+            self.toolname_servername_map[tool.name] = server_name
+            all_tools.append({
+                "type": "function",
                         "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.inputSchema
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.inputSchema
                         }
-                    })
+            })
 
         return all_tools
 

@@ -1,0 +1,18 @@
+{
+  "RM MCP Server": {
+    "command": "uv",
+    "args": [
+      "run",
+      "--python",
+      "3.12",
+      "--with",
+      "fastmcp",
+      "fastmcp",
+      "run",
+      "/Users/tamil/tamil/git_repository/tamil/ai/mcp/rm-mcp-server/main.py"
+    ],
+    "env": {
+      "MCP_SERVER_API_KEY": "$AP_KEY"
+    }
+  }
+}

@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_KEY = os.getenv("MCP_SERVER_API_KEY")
+SERVER_API_KEY = os.getenv("MCP_SERVER_API_KEY")
+LOCAL_API_KEY = os.getenv("LOCAL_API_KEY")
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,9 @@ class AuthMiddleware(Middleware):
 
     def __authenticate_client(self, headers):
         """ authenticate the client using the x-api-key header """
-        api_key = headers.get("x-api-key")
-        if not api_key or api_key != API_KEY:
+        api_key = headers.get("x-api-key") or LOCAL_API_KEY
+        logger.debug("API Key: %s, %s", api_key, SERVER_API_KEY)
+        if not api_key or api_key != SERVER_API_KEY:
             logger.error("Invalid or missing API key")
             raise McpError(error=ErrorData(
                 code=401, message="Invalid API Key"))

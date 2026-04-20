@@ -125,7 +125,7 @@ class SupervisorAgent(BaseAgent):
             traceback.print_exc()
             return None
 
-    async def orchestrate(self, appstate: AppState, mcp_session_map: dict) -> AppState:
+    async def orchestrate(self, appstate: AppState, mcp_client_map: dict) -> AppState:
         """ Orchestrate LLM calls, tools calls """
         try:
 
@@ -151,7 +151,7 @@ class SupervisorAgent(BaseAgent):
                 if (appstate.messages[-1].tool_calls and len(appstate.messages[-1].tool_calls) > 0):
                     # execute tool calls
                     appstate = await self.execute_tool_calls(self.toolname_servername_map,
-                                                             mcp_session_map, appstate)
+                                                             mcp_client_map, appstate)
                 else:
                     logger.debug(
                         "no tool calls detected, returning response...")

@@ -1,6 +1,4 @@
-from fastmcp import Context
 from server import mcp
-import asyncio
 import uvicorn
 import logging
 # import hooks # noqa: F401 - required to register middleware
@@ -16,91 +14,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-mock_recipes = [
-    {"id": 10966, "title": "Avocado Toast",
-        "ingredients": "Bread, Avocado, Lemon juice, Salt, Black pepper, Chili flakes"},
-    {"id": 10973, "title": "Butter Chicken",
-        "ingredients": "Chicken, Butter, Tomato puree, Cream, Garam masala, Garlic, Ginger"},
-    {"id": 11513, "title": "Coconut Shrimp with Pasta",
-        "ingredients": "Shrimp, Pasta, Onions, Garlic, Olive oil, Salt, Pepper"},
-    {"id": 11005, "title": "French Toast",
-        "ingredients": "Bread, Eggs, Milk, Cinnamon"},
-    {"id": 12005, "title": "Spicy Paneer with Rice and Kale",
-        "ingredients": "Paneer, Rice, Kale, Green Beans, Garlic, Olive oil, Salt, Pepper, Fresh herbs"}
-]
-
-@mcp.tool(name="search")
-async def recipe_search(query: str, context: Context) -> list[dict]:
-    """
-    Search for recipes by title or ingredients. 
-    Returns the top 5 matching IDs and Titles.
-    """
-    
-    logger.debug("Searching for recipes matching: %s", query)
-    
-    await context.report_progress(25, 100, "Searching recipes...")
-    
-    # await asyncio.sleep(5)
-    
-    await context.info(f"fetching recipes matching for query {query}")
-    
-    last_search_query = await context.get_state("last_search_query")
-    if last_search_query:
-        logger.debug("Previous search query was: %s", last_search_query)
-        
-    await context.set_state("last_search_query", query)
-    
-    recipes = []
-    for recipe in mock_recipes:
-        if query.lower() in recipe["title"].lower() or query.lower() in recipe["ingredients"].lower():
-            recipes.append({"id": recipe["id"], "title": recipe["title"]})
-    return recipes
-
-
-@mcp.tool("recipes")
-def get_recipe_details(recipe_id: int) -> dict:
-    """
-    Get the full details of a recipe by its ID.
-    """
-    logger.debug("Fetching details for recipe ID: %d", recipe_id)
-
-    for recipe in mock_recipes:
-        if recipe["id"] == recipe_id:
-            return recipe
-    return {"error": f"Recipe with ID {recipe_id} not found."}
-
-# resources return string response
-@mcp.resource(uri="recipe://docs/safety")
-def get_safety_guidelines() -> str:
-    """Mandatory kitchen safety protocols."""
-    
-    logger.debug("Fetching safety guidelines...")
-
-    return """
-    Safety Guidelines for Cooking:
-    1. Always wash your hands before handling food.
-    2. Keep raw and cooked foods separate to avoid cross-contamination.
-    3. Cook foods to their recommended internal temperatures.
-    4. Refrigerate perishable foods within two hours of cooking.
-    5. Use clean utensils and surfaces when preparing food.
-    """
-
-
-@mcp.resource(uri="recipe://docs/measurements")
-def get_measurements() -> str:
-    """Common cooking measurements."""
-    logger.debug("Fetching measurement conversions...")
-    return """
-    Measurement Conversions:
-    1 cup = 16 tablespoons = 48 teaspoons = 240 ml
-    1 tablespoon = 3 teaspoons = 14.8 ml
-    1 teaspoon = 4.9 ml
-    1 ounce = 28.3 grams
-    1 pound = 454 grams
-    """
+# def get_app():
+#     return mcp.http_app(transport="sse")
 
 
 # run the server
 if __name__ == "__main__":
+    pass
     # mcp.run(transport="sse")
-    uvicorn.run(mcp.http_app(transport="sse"), host="0.0.0.0", port=8002)
+    # uvicorn.run(mcp.http_app(transport="sse"), host="0.0.0.0", port=8002)
+    # uvicorn.run("main:get_app", host="0.0.0.0", port=8002, reload=True, factory=True)
+

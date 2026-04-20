@@ -19,7 +19,7 @@ settings = EnvSettings()
 
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     # include thread id
     format="%(asctime)s [%(levelname)s] [%(filename)s %(lineno)d] [Thread-%(thread)d] %(message)s",
     handlers=[
@@ -122,7 +122,7 @@ async def chat(thread_id: str, data: ChatRequest, request: Request, background_t
             working_state = original_state.model_copy(deep=True)
 
             working_state = await client.orchestrate(working_state,
-                                                         mcp_session_map=resource_registry.mcp_sessions)
+                                                         mcp_client_map=resource_registry.mcp_clients)
 
             messages_count = len(working_state.messages)
             working_state.messages_count = messages_count

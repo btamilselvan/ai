@@ -1,9 +1,9 @@
 import logging
 from openai import OpenAI
-from mcp import ClientSession
 import json
 from utils.models import AppState, ConversationModel, ToolCall, ToolFunctionInfo
 from typing import Dict
+from fastmcp import Client
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,16 @@ class BaseAgent:
         self.temperature = temperature
         self.tools = tools
         self.max_tokens = max_tokens
+
+    async def __tool_call_progress_handler(self, progress: float, total: float | None, message: str | None):
+        """ handle tool call progress """
+
+        # emit the tool call progress to the client (UI) - TODO
+        if total is not None:
+            percentage = (progress / total) * 100
+            logger.info("Progresss %.1f - %s ", percentage, message or '')
+        else:
+            logger.info("Progresss %.1f - %s ", progress, message or '')
 
     def __collect_tool_calls(self, response):
         if response.choices and response.choices[0].message.tool_calls:
@@ -33,9 +43,9 @@ class BaseAgent:
 
         return None
 
-    async def __invoke_tool(self, mcp_session: ClientSession, tool: ToolCall, thread_id):
-        tool_response = await mcp_session.call_tool(tool.function.name, json.loads(tool.function.arguments), meta={
-            "thread_id": thread_id})
+    async def __invoke_tool(self, mcp_client: Client, tool: ToolCall, thread_id):
+        tool_response = await mcp_client.call_tool(tool.function.name, json.loads(tool.function.arguments), meta={
+            "thread_id": thread_id}, progress_handler=self.__tool_call_progress_handler)
         logger.debug("tool response: %s", tool_response)
 
         tool_response_content_text = tool_response.content[0].text if tool_response.content else ""
@@ -71,7 +81,7 @@ class BaseAgent:
             {"role": "system", "content": prompt}
         ] + [msg.model_dump(exclude={"thread_id", "summary", "id", "created_at"}) for msg in appstate.messages]
 
-        logger.info("calling LLM with messages: %s", messages)
+        logger.debug("calling LLM with messages: %s", messages)
 
         try:
 
@@ -98,7 +108,7 @@ class BaseAgent:
             raise
             # return None
 
-    async def execute_tool_calls(self, toolname_servername_map: Dict[str, str], mcp_session_map, appstate: AppState) -> AppState:
+    async def execute_tool_calls(self, toolname_servername_map: Dict[str, str], mcp_client_map, appstate: AppState) -> AppState:
         """ execute the tool calls returned by the LLM """
 
         tool_responses = []
@@ -108,10 +118,10 @@ class BaseAgent:
 
             server_name = toolname_servername_map.get(
                 tool.function.name)
-            mcp_session: ClientSession = mcp_session_map.get(
+            mcp_client: Client = mcp_client_map.get(
                 server_name)
 
-            tool_response = await self.__invoke_tool(mcp_session, tool, appstate.thread_id)
+            tool_response = await self.__invoke_tool(mcp_client, tool, appstate.thread_id)
             # add tool response to the messages to be sent back to the LLM for the next iteration of the loop
             tool_responses.append(tool_response)
 
