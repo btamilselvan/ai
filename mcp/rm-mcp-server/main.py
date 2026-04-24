@@ -51,6 +51,6 @@ mcp.mount(recipe_mcp_server, namespace="recipes")
 mcp.mount(collections_mcp_server, namespace="collections")
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(mcp.http_app(transport="sse"), host="0.0.0.0", port=8002)
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run(mcp.http_app(transport="sse"), host="0.0.0.0", port=8002)

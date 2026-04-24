@@ -68,6 +68,32 @@ rm-mcp-server/
 
 ---
 
+## Generating Config Files
+
+Use the FastMCP CLI to auto-generate both config files.
+
+### Generate `fastmcp.json`
+```bash
+uv run fastmcp install mcp-json main.py >> fastmcp.json
+```
+
+With additional options:
+```bash
+uv run fastmcp install mcp-json main.py \
+  --name "RM MCP Server" \
+  --env MCP_SERVER_API_KEY=your-key >> fastmcp.json
+```
+
+### Generate `mcp-config.json`
+```bash
+uv run fastmcp install mcp-json main.py \
+  --name "RM MCP Server" \
+  --env-file .env \
+  --python 3.12 > mcp-config.json
+```
+
+---
+
 ## Configuration Files
 
 ### `fastmcp.json`

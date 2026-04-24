@@ -1,0 +1,17 @@
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "source": {
+    "path": "main.py",
+    "entrypoint": "mcp"
+  },
+  "deployment": {
+    "transport": "sse",
+    "port": 8003,
+    "host": "0.0.0.0"
+  },
+  "environment": {
+    "type": "uv",
+    "python": "3.12",
+    "dependencies": ["fastmcp", "httpx"]
+  }
+}
