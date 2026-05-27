@@ -13,10 +13,11 @@ A FastMCP server exposing general-purpose tools via the Model Context Protocol (
 uv sync
 
 # Run locally (fastmcp CLI — picks up fastmcp.json automatically)
-uv run fastmcp run main.py:mcp --transport sse --port 8003
+uv run fastmcp run main.py:mcp --transport streamable-http --port 8003 --path /mcp
 
 # Run locally (uvicorn directly)
 uv run uvicorn asgi:app --host 0.0.0.0 --port 8003
+uv run main.py
 
 # Build Docker image
 docker build -t general-purpose-mcp .

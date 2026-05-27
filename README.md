@@ -555,12 +555,29 @@ more resources are added later.
 option 1) expose the resources as tools
 option 2)
 
+
+## MCP vs SKILLS
+- Skills = Knowledge and workflows (what to do)
+- MCP = Tools and data access (how to do it)
+- https://www.skillsdirectory.com/docs/skills-vs-mcp
+
+File Size Guidelines
+
+File Type	Recommended Max Size
+SKILL.md	500 lines
+Reference files	200 lines each
+Scripts	300 lines each
+Templates	100 lines each
+
+
+
 ## References
 - https://api.smith.langchain.com/docs
 - chatgpt model comparision - https://developers.openai.com/api/docs/models/compare
 - ollama langchain integration - https://docs.langchain.com/oss/python/integrations/chat/ollama
 - Providers list - https://docs.langchain.com/oss/python/integrations/providers/overview
 - Spring AI MCP Server - https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html
+- Skills vs MCP - https://www.skillsdirectory.com/docs/skills-vs-mcp
 
 ## TODO
 - Local MCP server 

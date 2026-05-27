@@ -46,6 +46,17 @@ Tools can inject the raw Starlette `Request` object via `CurrentRequest()` to ac
 ### Auto-Discovery
 `FileSystemProvider` scans the `mcp/recipe` and `mcp/collection` directories and automatically registers any `@tool`, `@resource`, or `@prompt` decorated functions found there.
 
+
+---
+
+## Core Architecture
+
+Uvicorn (The Server): The worker that listens for incoming web traffic.
+
+Starlette (The Toolkit): Handles the "plumbing"—things like figuring out which URL was requested (Routing) and managing the request/response lifecycle.
+
+FastAPI / FastMCP (The Framework): Adds the "fancy" features like automatic JSON validation (Pydantic), tool definitions, and documentation.
+
 ---
 
 ## Project Structure

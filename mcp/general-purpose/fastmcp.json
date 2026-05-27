@@ -5,9 +5,10 @@
     "entrypoint": "mcp"
   },
   "deployment": {
-    "transport": "sse",
+    "transport": "streamable-http",
     "port": 8003,
-    "host": "0.0.0.0"
+    "host": "0.0.0.0",
+    "path": "/mcp"
   },
   "environment": {
     "type": "uv",
