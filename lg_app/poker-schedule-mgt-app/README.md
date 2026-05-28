@@ -1,0 +1,7 @@
+-- uv add langgraph grandalf
+-- uv pip install langgraph-cli "langgraph-cli[inmem]"
+-- langgraph dev
+-- langgraph-api is required to use A2A
+-- Langgraph automatically exposes agent-card endpoint.
+-- http://127.0.0.1:2024/.well-known/agent-card.json?assistant_id={assistant_id}
+-- https://reference.langchain.com/python/langgraph.prebuilt/tool_node/tools_condition

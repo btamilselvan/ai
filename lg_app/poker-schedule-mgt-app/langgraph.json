@@ -1,0 +1,10 @@
+{
+    "dependencies": [
+        "./"
+    ],
+    "env": "./.env",
+    "python_version": "3.14",
+    "graphs": {
+        "poker_agent": "./poker_agent/agent.py:agent"
+    }
+}
