@@ -1,7 +1,7 @@
 [project]
 name = "poker-schedule-mgt-app"
 version = "0.1.0"
-description = "Add your description here"
+description = "Poker Event Search and Planner Application"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

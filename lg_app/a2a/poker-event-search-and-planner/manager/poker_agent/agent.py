@@ -7,9 +7,10 @@ import logging
 from langchain.chat_models import init_chat_model
 from langgraph.prebuilt import ToolNode, tools_condition
 
-logger = logging.getLogger(__name__)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(filename)s: %(lineno)d] [Thread-%(thread)d] %(message)s",
                     handlers=[logging.StreamHandler()])
+logger = logging.getLogger(__name__)
 
 logger.info(
     "Poker Schedule Management Agent is starting up...")
