@@ -110,6 +110,9 @@ Think of Next.js as the Project Manager, SWC as the Translator (turning human-re
 - Use ```.tsx``` extension if the file contains UI components.
 - Use ```.ts``` extension if the file is pure configuration
 
+- only a server component can be marked async.
+- we cannot use server components in the client components (e.g. cookies)
+
 ## Tailwind css
 - Utility-first CSS framework.
 - Think of traditional CSS as buying pre-assembled LEGO sets, while Tailwind is like getting a massive box of individual bricks.

@@ -36,7 +36,7 @@ export default function LoginForm() {
         }
         // send a POST request to the /api/login URL with the email and password
         // the API route (/api/login/route.ts) will handle the authentication logic and return a response indicating success or failure
-        const response = await fetch("/api/login", {
+        const response = await fetch("/api/auth/custom/login", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -97,6 +97,11 @@ export default function LoginForm() {
                 <button type="button" onClick={handleClear} className="bg-gray-300 text-gray-700 p-2 rounded">
                     Clear
                 </button>
+                <div className="flex items-center gap-2">
+                    <hr className="flex-1 border-gray-300" />
+                    <span className="text-gray-400 text-sm">or</span>
+                    <hr className="flex-1 border-gray-300" />
+                </div>
                 <button type="button" className="bg-red-500 text-white p-2 rounded" onClick={signInWithGoogle}>
                     Sign in with Google
                 </button>

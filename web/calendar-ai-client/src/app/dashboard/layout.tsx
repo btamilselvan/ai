@@ -2,16 +2,23 @@
 // the side bar can be collapsible and the content area should take up the remaining space
 
 import Sidebar from "./Sidebar";
+import { cookies } from "next/headers";
 
 const props = {
-  headerTitle: "Trocks AI Chatbotss",
+  headerTitle: "Trocks AI Chatbots",
 }
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+
+
+  const cookiesStore = await cookies();
+  const isGoogleAuthenticated = !!cookiesStore.get("googleAccessToken");
+
+
   return (
 
     <div className="h-screen flex flex-col">
@@ -20,7 +27,7 @@ export default function DashboardLayout({
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
+        <Sidebar googleAuthenticated={isGoogleAuthenticated} />
         <main className="flex-1 p-4">{children}</main>
       </div>
       <footer className="bg-gray-800 text-white p-4 text-center">

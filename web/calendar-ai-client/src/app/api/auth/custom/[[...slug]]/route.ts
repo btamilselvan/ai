@@ -2,11 +2,16 @@
 // The route also includes error handling to manage any issues that may arise during the login process.
 // This runs on the server side and is responsible for communicating with the backend API to authenticate the user and manage their session.
 
+
 import { NextRequest, NextResponse } from "next/server";
 import { log } from "@/lib/logger";
-import { cookies } from "next/headers";
+import { cookies } from "next/headers"
 
-export async function POST(request: Request): Promise<NextResponse> {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ slug: string[] }> }) {
+
+    const { slug } = await params;
+    log("info", "Received request to dynamic route with slug:", { slug })
+
     try {
         const { email, loginPassword } = await request.json();
         log("debug", "Received login request for email:", { email });
@@ -61,6 +66,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         });
     }
 }
+
 
 //logout
 export async function GET(request: NextRequest) {
