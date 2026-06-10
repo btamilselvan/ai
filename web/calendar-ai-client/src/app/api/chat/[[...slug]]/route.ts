@@ -44,6 +44,6 @@ export async function POST(request: NextRequest, context: ContextParamProps) {
     });
 }
 
-async function invokeCalendarAgent(message: ChatMessage){
+async function invokeCalendarAgent(message: ChatMessage, request: NextRequest){
 
 }

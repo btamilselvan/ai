@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { log } from "@/lib/logger";
-import { cookies } from "next/headers";
+import { exchangeCodeForToken, getOauthUrl, getUserInfo } from "@/lib/googleAuth"
+import { saveGoogleCredentials } from "@/app/services/auth"
+import { setCookie } from "@/lib/cookie"
+import * as Constants from "@/lib/constants"
 
 interface RouteParams {
     params: Promise<{
@@ -26,7 +29,7 @@ export async function GET(request: Request, context: RouteParams) {
     if (action === "login") {
         return initiateGoogleOAuth();
     } else if (action === "callback") {
-        return await exchangeCodeForToken(request);
+        return await getToken(request);
     } else {
         return new NextResponse("Not found", { status: 404 });
     }
@@ -34,15 +37,11 @@ export async function GET(request: Request, context: RouteParams) {
 
 function initiateGoogleOAuth() {
     // this function will construct the Google OAuth URL with the necessary query parameters and redirect the user to it
-    const google_client_id = process.env.GOOGLE_CLIENT_ID;
-    const google_redirect_uri = process.env.GOOGLE_REDIRECT_URI;
-    const google_auth_scope = process.env.GOOGLE_AUTH_SCOPE;
-
     const state = Math.random().toString(36).substring(2); // generate a random state parameter for CSRF protection
     // store the state parameter in a cookie or session to verify it later in the callback route
     // for simplicity, we will skip this step in this example, but in a production application, you should implement proper state management for security
 
-    const google_oauth_url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${google_client_id}&redirect_uri=${google_redirect_uri}&response_type=code&scope=${encodeURIComponent(google_auth_scope)}&state=${state}&access_type=offline`;
+    const google_oauth_url = getOauthUrl(state);
     return new NextResponse("Redirecting to Google OAuth...", {
         status: 302,
         headers: {
@@ -51,33 +50,24 @@ function initiateGoogleOAuth() {
     });
 }
 
-async function exchangeCodeForToken(request: Request) {
+async function getToken(request: Request) {
     // this function will exchange the authorization code for an access token by making a POST request to the google oauth API
-    const cookiesStore = await cookies();
 
     // unpack the query parameters from the callback URL
     const { searchParams } = new URL(request.url);
     const code = searchParams.get("code");
     const state = searchParams.get("state");
-
     //compare state with the value stored in the cookie or session to verify it (skipped in this example for simplicity)
+
+    if (!code) {
+        const loginUrl = new URL("/", request.url);
+        return NextResponse.redirect(loginUrl);
+    }
 
     log("debug", "Extracted code and state from callback URL:", { code, state });
 
     //exchange the authorization code for an access token by making a POST request to the google oauth API
-    const response = await fetch(`https://oauth2.googleapis.com/token`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-            client_id: process.env.GOOGLE_CLIENT_ID,
-            redirect_uri: process.env.GOOGLE_REDIRECT_URI,
-            client_secret: process.env.GOOGLE_CLIENT_SECRET,
-            grant_type: "authorization_code",
-            code: code,
-        }),
-    });
+    const response = await exchangeCodeForToken(code);
     log("debug", "Received response from Google token exchange:", { status: response.status });
 
     if (response.ok) {
@@ -85,26 +75,29 @@ async function exchangeCodeForToken(request: Request) {
         log("debug", "Received access token from Google:", { data });
 
         // store the access token in a cookie or session for later use
-        cookiesStore.set("googleAccessToken", data.access_token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
-            path: "/",
-            maxAge: 60 * 60 * 24 * 7, // 7 days
-        });
+        await setCookie(Constants.GOOGLE_ACCESS_TOKEN_COOKIE_NAME, data.access_token);
 
-        //obtain refresh token if available and store it as well
-        if (data.refresh_token) {
-            log("debug", "Received refresh token from Google:", { refresh_token: data.refresh_token });
-            cookiesStore.set("googleRefreshToken", data.refresh_token, {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
-                sameSite: "strict",
-                path: "/",
-                maxAge: 60 * 60 * 24 * 30, // 30 days
-            });
-        }
-        // store the refresh token in a table in the database associated with the user for later use in refreshing the access token when it expires (skipped in this example for simplicity)
+        // fetch user info
+        const userResponse = await getUserInfo(data.access_token);
+        const userData = await userResponse.json();
+        //assume userResponse is OK. store user email in cookie
+        await setCookie(Constants.GOOGLE_USER_EMAIL_COOKIE_NAME, userData.email);
+        await setCookie(Constants.GOOGLE_USERNAME_COOKIE_NAME, userData.name);
+
+        log("debug", "Received user info from Google:", { userData });
+
+        //post google auth credentials to the backend
+        const apiResponse = await saveGoogleCredentials(JSON.stringify({
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+            scope: data.scope,
+            user_id: userData.id,
+            email: userData.email,
+            name: userData.name,
+            picture: userData.picture
+        }));
+        log("info", "google credentials sent to the backend server", { "status": await apiResponse.json() });
+
         return NextResponse.redirect(new URL("/dashboard", request.url));
     } else {
         log("error", "Failed to exchange authorization code for access token:", { body: await response.text() });
