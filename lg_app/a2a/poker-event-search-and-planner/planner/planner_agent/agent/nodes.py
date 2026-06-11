@@ -3,10 +3,13 @@ import logging
 from langchain.chat_models import init_chat_model
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_google_community import CalendarToolkit
-from planner_agent.util.google_resources import toolkit
 from langgraph.prebuilt import ToolNode, tools_condition
 import asyncio
-from planner_agent.agent.tools import get_calendar_info, search_events
+from planner_agent.agent.tools import (
+    get_calendar_info,
+    search_events,
+    get_current_datetime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +49,7 @@ logger.info("Setting up LLM node...")
 def configure_model_with_tools():
     try:
         global toolnode, model_with_tools
-        tools = toolkit.get_tools()
+        tools = [get_calendar_info, search_events, get_current_datetime]
 
         # print tool schema for debugging
         # logger.info(f"Fetched tools: {tools}")

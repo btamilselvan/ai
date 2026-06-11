@@ -97,14 +97,16 @@ app = FastAPI(
 
 @app.get("/health")
 def health_check():
+    """ Health check endpoint """
     logger.info("current date time is %s", str(datetime.datetime.now()))
     return {"status": "healthy", "datetime": str(datetime.datetime.now())}
 
 
-@app.post("/google/credentials")
+@app.post("/google/credentials", summary="Save google credentials (accessToken, refreshToken, email) in the database.")
 def save_google_credentials(
     credentials: dict, redis: redis.Redis = Depends(get_redis_client)
 ):
+    """ Save google credentials (accessToken, refreshToken, email) in the database. """
     email = credentials.get("email")
     logger.info("save google token %s for user %s", credentials, email)
     save_token(email, credentials, redis)
@@ -125,7 +127,7 @@ def get_refresh_token(email, redis: Redis = Depends(get_redis_client)):
 
 
 @app.get("/google/calendar/info")
-def chat(email, redis: redis.Redis = Depends(get_redis_client)):
+def get_calendar_info(email, redis: redis.Redis = Depends(get_redis_client)):
     logger.info("get calendar info for user %s", email)
     get_calendar_info(email, redis)
     return {"status": "success"}

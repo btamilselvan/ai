@@ -1,4 +1,5 @@
 from googleapiclient.discovery import build
+from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 from dotenv import load_dotenv
 import os
@@ -9,10 +10,14 @@ from langchain_google_community.calendar.search_events import CalendarSearchEven
 from langchain_google_community.calendar.current_datetime import GetCurrentDatetime
 import json
 from redis import Redis
+from planner_agent.util.resource_registry import ResourceRegistry
+from fastapi import Request
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+logger.info("Setting up Google Calendar API client...")
 
 
 def save_token(email, token: dict, r: Redis):

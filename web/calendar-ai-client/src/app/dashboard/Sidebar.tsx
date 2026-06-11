@@ -5,6 +5,7 @@
 // the sidebar should also have a dark mode toggle button that allows users to switch between light and dark themes
 
 import { useState } from "react";
+import Link from "next/link";
 
 interface SidebarProps {
   readonly googleAuthenticated: boolean;
@@ -17,6 +18,11 @@ export default function Sidebar({ googleAuthenticated }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   console.log("available chatbots from env variable:", process.env.NEXT_PUBLIC_CHATBOTS);
+
+  const linkClickEvent = () => {
+    console.log("link clicked");
+    
+  }
 
   return (
     <aside className={`bg-gray-200 p-4 transition-all duration-300 flex flex-col h-full ${collapsed ? "w-10" : "w-64"}`}>
@@ -32,9 +38,10 @@ export default function Sidebar({ googleAuthenticated }: SidebarProps) {
             const trimmedChatbot = chatbot.trim();
             return (
               <li key={trimmedChatbot}>
-                <a href={`/dashboard/${trimmedChatbot.toLowerCase().replace(/\s+/g, "-")}`} className="text-blue-500 hover:underline">
+                {/* <a href={`/dashboard/${trimmedChatbot.toLowerCase().replace(/\s+/g, "-")}`} className="text-blue-500 hover:underline">
                   {trimmedChatbot}
-                </a>
+                </a> */}
+                <Link onClick={linkClickEvent} href={`/dashboard/${trimmedChatbot.toLowerCase().replace(/\s+/g, "-")}`} className="text-blue-500 hover:underline">{trimmedChatbot}</Link>
               </li>
             );
           })}
