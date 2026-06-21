@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { log } from "@/lib/logger";
 import { cookies } from "next/headers";
-import { getGoogleRefreshToken } from "@/app/services/auth"
+import { getGoogleRefreshToken, updateGoogleAccessToken } from "@/app/services/auth"
 import { refreshAccessToken } from "@/lib/googleAuth";
 import { setCookie } from "@/lib/cookie"
 import {
@@ -32,6 +32,8 @@ export async function GET(request: NextRequest) {
             log("debug", "new access token received", { newAccessToken })
             //refresh cookie
             setCookie(GOOGLE_ACCESS_TOKEN_COOKIE_NAME, newAccessToken);
+            //save new access token in the database
+            await updateGoogleAccessToken(email, newAccessToken);
             return NextResponse.redirect(new URL(returnTo, request.url));
         }
     }

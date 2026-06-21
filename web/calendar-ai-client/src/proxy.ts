@@ -33,4 +33,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
 }
 
-
+export const config = {
+    // The "matcher" tells Next.js where to apply this middleware
+    matcher: '/dashboard/:path*',
+};

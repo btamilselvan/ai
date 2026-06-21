@@ -1,31 +1,37 @@
 from langchain_core.tools import tool
 
 
-@tool(description="Tool that gets the current datetime according to the calendar timezone.")
+@tool(
+    description="Tool that gets the current datetime according to the calendar timezone."
+)
 def get_current_datetime():
     """Returns current datetime according to the calendar timezone"""
     pass
 
 
-@tool(
-    description="Tool that get information about the calendars in Google Calendar."
-)
-def get_calendar_info():
+@tool(description="Tool that get information about the calendars in Google Calendar.")
+def get_calendars_info():
+    """Returns information about the calendars in Google Calendar"""
     pass
 
 
 @tool(
     description="Use this tool to search for events in Google Calendar",
     args_schema={
+        # "calendars_info": {
+        #     "name": "calendars_info",
+        #     "type": "list[dict]",
+        #     "description": "A list with the information about all Calendars in Google Calendar Use the tool 'get_calendars_info' to get it.",
+        # },
         "min_datetime": {
             "name": "min_datetime",
             "type": "string",
-            "description": "The start datetime for the events in 'YYYY-MM-DD HH:MM:SS' format.",
+            "description": "The start datetime for the events. MUST be striclty in 'YYYY-MM-DD HH:MM:SS' format.",
         },
         "max_datetime": {
             "name": "max_datetime",
             "type": "string",
-            "description": "The end datetime for the events in 'YYYY-MM-DD HH:MM:SS' format.",
+            "description": "The end datetime for the events. MUST be strictly in 'YYYY-MM-DD HH:MM:SS' format.",
         },
         "single_events": {
             "name": "single_events",
@@ -41,7 +47,6 @@ def get_calendar_info():
         },
     },
 )
-
 @tool(description="Tool that retrieves events from Google Calendar.")
 def search_events(min_datetime, max_datetime):
     pass

@@ -35,6 +35,7 @@ and every keyword argument you pass to .list() corresponds to a query parameter 
 ```bash
 # Development
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 9000
+uv run uvicorn planner_agent.main:app --reload --host 0.0.0.0 --port 9000
 
 # Production
 uv run gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:9000

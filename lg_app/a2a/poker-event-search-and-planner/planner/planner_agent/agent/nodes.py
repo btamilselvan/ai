@@ -1,14 +1,22 @@
 from planner_agent.util.app_state import AppState
 import logging
+import json
 from langchain.chat_models import init_chat_model
+from langchain_core.messages import ToolMessage, AIMessage, ToolCall
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_google_community import CalendarToolkit
 from langgraph.prebuilt import ToolNode, tools_condition
-import asyncio
+from redis import Redis
+from typing import List
 from planner_agent.agent.tools import (
-    get_calendar_info,
+    get_calendars_info,
     search_events,
     get_current_datetime,
+)
+from planner_agent.util.google_resources import (
+    get_calendar_info as google_calendar_info,
+    get_current_datetime as google_calendar_datetime,
+    search_events as google_search_events,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,6 +48,7 @@ Always return your analysis in a clear, summarized format that the Manager can p
 
 SYSTEM_PROMPT_GENERAL = """
  You are a helpful assistant that can answer questions and perform tasks related to scheduling calendar events. You can search for current scheduling events, add new events to the user's calendar, and provide information about the events. Always be polite and informative in your responses.
+ Make sure to send tool call arguments in the format expected by the tool.
 """
 
 
@@ -49,7 +58,7 @@ logger.info("Setting up LLM node...")
 def configure_model_with_tools():
     try:
         global toolnode, model_with_tools
-        tools = [get_calendar_info, search_events, get_current_datetime]
+        tools = [get_calendars_info, search_events, get_current_datetime]
 
         # print tool schema for debugging
         # logger.info(f"Fetched tools: {tools}")
@@ -80,35 +89,79 @@ configure_model_with_tools()
 
 def llm_node(state: AppState):
 
-    logger.info("LLM node received state: {%s}", state)
+    # logger.info("LLM node received state: {%s}", state)
 
     response = model_with_tools.invoke([SYSTEM_PROMPT_GENERAL] + state.messages)
 
     logger.info("LLM response: {%s}", response)
 
-    return AppState(messages=[response])
-    # return AppState(messages=state.messages)
+    return AppState(messages=[response], thread_id=state.thread_id, email=state.email)
 
 
-def tool_node_wrapper(state: AppState):
+def tool_node_wrapper(state: AppState, r: Redis):
+    # logger.info("Tool node received state: {%s}", state)
+
+    # find tool name from recent AI Message
+    recent_ai_message: AIMessage = state.messages[-1]
+
+    for tool_call in recent_ai_message.tool_calls:
+        # logger.info("Processing tool call: {%s}", tool_call)
+        state = __execute_tool_call(tool_call, state, r)
+
+    return state
+
+def __execute_tool_call(tool_call: ToolCall, state: AppState, r: Redis):
+    tool_name = tool_call["name"]
+    tool_call_id = tool_call["id"]
+    logger.info("Executing tool call: {%s}", tool_call)
+
     try:
-        logger.info("Tool node received state: {%s}", state)
-        # tool_response = toolnode.invoke(state)
-        # logger.info(f"Tool node response: {tool_response}")
-        # return AppState(messages=[tool_response])
-        # find tool name from recent AI Message
-        recent_ai_message = state.messages[-1]
-        tool_name = recent_ai_message.tool_calls[0]["name"]
         if tool_name == "search_events":
             logger.info("Executing search_events tool")
-            # call search events tool
-            # search_events()
-        elif tool_name == "get_calendar_info":
-            logger.info("Executing get_calendar_info tool")
-            # call get calendar info tool
-            get_calendar_info()
-        logger.info("Executing tool: {%s}", tool_name)
-        return AppState(messages=state.messages)
+            args = tool_call.get("args", {})
+            tool_response = google_search_events(
+                state.email,
+                r,
+                args.get("min_datetime"),
+                args.get("max_datetime"),
+                args.get("single_events", True),
+                args.get("", None),
+            )
+        elif tool_name == "get_calendars_info":
+            logger.info("Executing get_calendars_info tool....")
+            tool_response = google_calendar_info(state.email, r)
+        elif tool_name == "get_current_datetime":
+            logger.info("Executing get_current_datetime tool")
+            tool_response = google_calendar_datetime(state.email, r)
+        else:
+            logger.error("Unknown tool name: {%s}", tool_name)
+            tool_response = (
+                f"Unknown tool name: {tool_name}, tool_call_id: {tool_call_id}"
+            )
+
+        logger.info("Tool response: {%s}", tool_response)
+
+        if tool_response:
+            tool_message = ToolMessage(
+                content=json.dumps(tool_response), tool_call_id=tool_call_id
+            )
+            state.messages = [tool_message]
+        else:
+            logger.warning("No tool response generated")
+            state.messages = [
+                ToolMessage(
+                    content="Tool executed but no response generated",
+                    tool_call_id=tool_call_id,
+                )
+            ]
+        return state
+
     except Exception as e:
-        logger.exception("Error occurred in tool node: {%s}", e)
-        return AppState(messages=[f"Tool execution failed: {str(e)}"])
+        logger.exception("Error occurred in tool execution: {%s}", e)
+        state.messages = [
+            ToolMessage(
+                content=f"Tool execution failed: {str(e)}",
+                tool_call_id=tool_call_id,
+            )
+        ]
+        return state
