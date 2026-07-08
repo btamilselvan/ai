@@ -10,3 +10,8 @@ export async function setCookie(name: string, value: string) {
         // maxAge: 60 * 60 * 24 * 7, // 7 days
     })
 }
+
+export async function getCookie(name: string) {
+    const cookiesStore = await cookies();
+    return cookiesStore.get(name)?.value;
+}

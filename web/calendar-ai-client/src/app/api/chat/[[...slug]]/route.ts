@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { log } from "@/lib/logger"
 import { ChatMessage } from "@/lib/models";
+import { chatWithAI } from "@/app/services/chat"
 
 // next js context object properties (for now it contains only params. maybe nextjs will add more properties in the future!)
 interface ContextParamProps {
@@ -23,19 +24,27 @@ export async function POST(request: NextRequest, context: ContextParamProps) {
 
     const agent = slug[0]
 
-    if (agent == "calendarai") {
-        //call calendar agent
-    }
-
     log("info", "Slug value is :", { slug: slug[0] });
     const body = await request.json();
     log("info", "Body value is :", { body });
     const message: ChatMessage = body.data;
 
+    if (agent == "calendarai") {
+        //call calendar agent
+        const aiResponse: ChatMessage = await chatWithAI(message);
+        log("info", "AI Response is :", { aiResponse })
+
+        return new Response(JSON.stringify(aiResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+        });
+    }
+
     const aiMessage: ChatMessage = {
         role: "assistant",
         content: `Hello, you sent me a message: ${message.content}`,
         timestampInUtcMillis: new Date().getUTCMilliseconds(),
+        threadId: message.threadId
     }
 
     return new Response(JSON.stringify(aiMessage), {
@@ -44,6 +53,6 @@ export async function POST(request: NextRequest, context: ContextParamProps) {
     });
 }
 
-async function invokeCalendarAgent(message: ChatMessage, request: NextRequest){
+async function invokeCalendarAgent(message: ChatMessage, request: NextRequest) {
 
 }

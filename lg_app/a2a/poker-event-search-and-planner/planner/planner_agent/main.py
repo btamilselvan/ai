@@ -32,6 +32,7 @@ from planner_agent.util.google_resources import (
 import redis
 from planner_agent.util.redis_db import get_appstate, save_appstate
 from planner_agent.util.models import ChatModel
+from planner_agent.util.agent_card import (AgentCard, AgentCapabilities, AgentSkill, AuthSchema, InputSchema)
 
 logger = logging.getLogger(__name__)
 logger.info("Planner Agent is starting up...")
@@ -177,7 +178,7 @@ def chat(
     # logger.info("retrieved app state %s", current_state)
     history = current_state.messages or []
     # add current user message to the history
-    messages = history + [HumanMessage(content=body.message)]
+    messages = history + [HumanMessage(content=body.content)]
 
     # update app state
     # invoke LLM
@@ -188,11 +189,74 @@ def chat(
 
     # persist app state back to redis
     save_appstate(new_state, redis)
+    
+    # persist conversation history as well
 
     logger.info("final response %s", new_state["messages"][-1].content)
+    
+    response: ChatModel = ChatModel(
+        content=new_state["messages"][-1].content,
+        thread_id=body.thread_id,
+        email=body.email,
+        timestampInUtcMillis=int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000),
+        role="assistant"
+    )
 
-    return {
-        "response": new_state["messages"][-1].content,
-        "thread_id": body.thread_id,
-        "email": body.email,
-    }
+    return response
+
+
+@app.post("/demo", summary="Demo Chat with Calendar/Planner agent")
+def chat(
+    body: ChatModel,
+    redis: redis.Redis = Depends(get_redis_client),
+):
+    logger.info("request received %s", body)
+    response: ChatModel = ChatModel(
+        content=body.content,
+        thread_id=body.thread_id,
+        email=body.email,
+        timestampInUtcMillis=int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000),
+        role="assistant"
+    )
+    return response
+
+
+@app.get("/.well-known/agent-card.json")
+def agent_card():
+    """Agent Card for the Planner Agent"""
+    logger.info("agent card requested")
+    agent_card = AgentCard(
+        name="Event Search and Planning Agent",
+        description="An agent that helps users search for events and plan their attendance",
+        version="1.0.0",
+        provider={
+            "name": "Poker Event Planner Inc",
+            "url": "https://planner.tamils.rokcs",
+            "contact": "support@tamils.rocks"
+        },
+        url="https://planner.tamils.rokcs",
+        capabilities=AgentCapabilities(streaming=False, push_notification=False, a2a_version="1.0.0"),
+        skills=[
+            AgentSkill(
+                name="Search Events",
+                id="search_events",
+                description="Search for available events based on date range",
+                input_schema=InputSchema(
+                    type="object",
+                    properties={
+                        "minDatetime": {"type": "string", "format": "date-time", "description": "The starting ISO 8601 date-time filter (e.g., 2026-06-01T00:00:00Z)"},
+                        "maxDatetime": {"type": "string", "format": "date-time", "description": "The ending ISO 8601 date-time filter (e.g., 2026-07-01T00:00:00Z)"},
+                    },
+                    required=["minDatetime", "maxDatetime"]
+                )
+            )
+        ],
+        tags=["events", "planning"],
+        authentication=AuthSchema(
+            schemes=["api_key"],
+            description="Supports API key authentication"
+        ),
+        last_updated="2026-06-01"
+    )
+    
+    return agent_card
