@@ -10,11 +10,12 @@ from poker_agent.agents.manager.utils import (
     ManagerAgentResponse,
     delegate_to_planner_tool,
 )
+from poker_agent.agents.manager.remote_tool import register_remote_agent
 from typing import Literal
 
 load_dotenv()
 
-SYSTEM_PROMPT_WITH_PLANNER_AGENT = """
+SYSTEM_PROMPT_WITH_PLANNER_AGENT_1 = """
 
 You are an expert poker travel coordinator and the lead orchestrator of this application. Your goal is to help the user find live poker tournaments in the US and seamlessly integrate them into their personal schedule.
 
@@ -29,6 +30,21 @@ CRITICAL INSTRUCTIONS FOR ROUTING:
 
 Maintain a professional, helpful tone. When the Planner Agent returns its findings (such as conflicts or confirmation), synthesize those results and present them clearly to the user.
 """
+
+SYSTEM_PROMPT_WITH_PLANNER_AGENT = """
+You are an expert poker travel coordinator and the lead orchestrator of this application. Your goal is to help users find live poker tournaments in the US and seamlessly integrate them into their personal schedules.
+
+To assist the user, you have access to external capabilities that allow you to search for real-time poker data and interact with the user's personal calendar. 
+
+CRITICAL OPERATIONAL RULES:
+1. Data Accuracy: When looking up tournament schedules, buy-ins, locations, and structures, always rely entirely on your external search capabilities. Do not hallucinate, guess, or estimate tournament data.
+2. Calendar & Scheduling Delegation: You are the poker data and communication expert, not a scheduling system. You must never attempt to manually calculate availability, manage calendar slots, or resolve time-zone conflicts yourself. 
+3. Handoff Trigger: Whenever the user wants to check their availability, add an event, or book a tournament (e.g., "Am I free?", "Book this", "Put it on my calendar"), you must immediately invoke the appropriate scheduling capability. You must construct a clear, detailed description of the user's request and the relevant tournament details to pass into that capability.
+
+Maintain a professional, helpful tone. When the external systems return data (such as search results, scheduling conflicts, or booking confirmations), synthesize those results and present them clearly and elegantly to the user.
+
+"""
+
 
 
 def configure_logging():
@@ -52,11 +68,12 @@ async def configure_model_and_tools():
             }
         }
     )
+    
+    planner_agent_tools = register_remote_agent("Planner Agent", "http://localhost:9000")
+    
     tools = await mcp_client.get_tools(server_name="poker_scout_mcp")
     # filter non poker agent search tools
-    tools = [tool for tool in tools if "poker_agent" in tool.name] + [
-        delegate_to_planner_tool
-    ]
+    tools = [tool for tool in tools if "poker_agent" in tool.name] + planner_agent_tools
 
     global tool_node
     tool_node = ToolNode(tools)
@@ -104,17 +121,19 @@ def conditional_node(app_state: AppState) -> Literal["tools", "planner", "END"]:
 
     if not ai_message.tool_calls:
         return "END"
+    
+    return "tools"
 
-    if ai_message.tool_calls[0]["name"] == "delegate_to_planner":
-        logger.info(
-            "Planner delegation tool call found. Routing to planner node for planner delegation."
-        )
-        return "planner"
-    else:
-        logger.info(
-            "Tool calls found, but not for planner delegation. Routing to tools node."
-        )
-        return "tools"
+    # if ai_message.tool_calls[0]["name"] == "delegate_to_planner":
+    #     logger.info(
+    #         "Planner delegation tool call found. Routing to planner node for planner delegation."
+    #     )
+    #     return "planner"
+    # else:
+    #     logger.info(
+    #         "Tool calls found, but not for planner delegation. Routing to tools node."
+    #     )
+    #     return "tools"
 
 
 async def tool_node_wrapper(app_state: AppState):

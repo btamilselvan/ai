@@ -1,6 +1,9 @@
 import os
 import logging
 import json
+import random
+import string
+from datetime import datetime as datetime_cls
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +34,7 @@ from planner_agent.util.google_resources import (
 )
 import redis
 from planner_agent.util.redis_db import get_appstate, save_appstate
-from planner_agent.util.models import ChatModel
+from planner_agent.util.models import ChatModel, A2AResponse, A2AResponseResult, A2ARequest, A2ARequestParams
 from planner_agent.util.agent_card import (AgentCard, AgentCapabilities, AgentSkill, AuthSchema, InputSchema)
 
 logger = logging.getLogger(__name__)
@@ -43,7 +46,9 @@ load_dotenv()
 API_KEY_HEADER_NAME = "x-api-key"
 
 # How to read API Key Header
-header_scheme = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=True)
+header_scheme = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
+
+PUBLIC_ROUTES = ["/health", "/.well-known/agent-card.json"]
 
 
 async def build_graph(redis_client: redis.Redis):
@@ -83,14 +88,20 @@ async def lifespan(app: FastAPI):
     logger.info("server shutdown initiated..")
 
 
-def validate_api_key(api_key: str = Security(header_scheme)):
-    logger.info("validating api key %s", api_key)
+def validate_api_key(api_key: str = Security(header_scheme), request: Request = None):
+    
+    logger.info("validating route %s", request.url.path)
+    
+    if request and request.url.path in PUBLIC_ROUTES:
+        logger.info("public route accessed, skipping API key validation")
+        return None
+    
     if not api_key or api_key != os.getenv("API_KEY"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key"
         )
 
-    return api_key
+    return None
 
 
 def get_redis_client(request: Request):
@@ -229,6 +240,7 @@ def agent_card():
         name="Event Search and Planning Agent",
         description="An agent that helps users search for events and plan their attendance",
         version="1.0.0",
+        a2a_endpoint="http://localhost:9000/a2a",
         provider={
             "name": "Poker Event Planner Inc",
             "url": "https://planner.tamils.rokcs",
@@ -260,3 +272,54 @@ def agent_card():
     )
     
     return agent_card
+
+@app.post("/a2a/message/send", summary="Handle A2A message send requests")
+def a2a_message_send_handler(request: Request, response: Response):
+    """Handle A2A message send requests"""
+    logger.info("A2A message send request received %s", request)
+    
+@app.post("/a2a/message/stream", summary="Handle A2A message stream requests")
+def a2a_message_stream_handler(request: Request, response: Response):
+    """Handle A2A message stream requests"""
+    logger.info("A2A message stream request received %s", request)
+
+@app.post("/a2a", summary="Handle A2A RPC requests")
+def a2a_rpc_handler(request: A2ARequest, r: redis.Redis = Depends(get_redis_client)):
+    """Handle A2A RPC requests"""
+    logger.info("A2A RPC request received %s", request)
+    
+    if request.params.skill == "search_events":
+        logger.info("Handling search_events skill with arguments: %s", request.params.arguments)
+        
+        context_id = request.params.contextId if request.params.contextId else ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
+        
+        email = request.params.arguments.get("email")
+        min_datetime: str = request.params.arguments.get("minDatetime")
+        max_datetime: str = request.params.arguments.get("maxDatetime")
+        
+        # datetime_a.f
+        
+        min_datetime_formatted = datetime_cls.fromisoformat(min_datetime.replace('Z', '+00:00')).strftime("%Y-%m-%d %H:%M:%S") if min_datetime else None
+        max_datetime_formatted = datetime_cls.fromisoformat(max_datetime.replace('Z', '+00:00')).strftime("%Y-%m-%d %H:%M:%S") if max_datetime else None
+
+        response = google_search_events(email, r, min_datetime_formatted, max_datetime_formatted, True, None)
+        
+        # logger.info("search_events response for user %s: %s", email, response)
+        
+        return A2AResponse(
+            jsonrpc="2.0",
+            id=request.id,
+            result=A2AResponseResult(
+                output={"data": response},
+                contextId=context_id
+            )
+        )
+    
+    return A2AResponse(
+        jsonrpc="2.0",
+        id="request_1234",
+        result=A2AResponseResult(
+            output={"data": []},
+            contextId=None
+        )
+    )

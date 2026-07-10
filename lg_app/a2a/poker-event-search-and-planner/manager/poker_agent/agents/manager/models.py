@@ -1,20 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Dict, Any
-
-class ChatModel(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    role: str
-    content: str
-    # validation_alias - used to name the field in the json input
-    # serialization_alias - used to name the field in the json output
-    thread_id: str = Field(alias="threadId")
-    email: str
-    timestampInUtcMillis: int | None = None
-
-class ConversationHistory(BaseModel):
-    pass
-
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional
 
 class A2ARequestParams(BaseModel):
     """
@@ -37,10 +22,10 @@ class A2ARequest(BaseModel):
     id: str = Field(..., description="A unique identifier for the request, which is used to match responses with requests.")
     params: A2ARequestParams = Field(..., description="The parameters for the method being invoked.")
 
-
 class A2AResponseResult(BaseModel):
     """
     A2AResponseResult is a Pydantic model that represents the result field in the A2A API response.
+    It contains a single field, 'response', which is a string representing the response to the user's query.
     """
     output: dict = Field(..., description="The response to the user's query, which is a dictionary.")
     contextId: Optional[str] = Field(None, description="Optional conversation tracking identifier to maintain multi-turn context between agents.")
@@ -48,6 +33,7 @@ class A2AResponseResult(BaseModel):
 class A2AResponse(BaseModel):
     """
     A2AResponse is a Pydantic model that represents the response body for the A2A API.
+    It contains a single field, 'response', which is a string representing the response to the user's query.
     """
     jsonrpc: str = Field("2.0", description="The JSON-RPC version, which is always '2.0'.")
     id: str = Field(..., description="A unique identifier for the request, which is used to match responses with requests.")

@@ -54,6 +54,8 @@ class AgentCard(BaseModel):
     
     last_updated: str = Field(alias="lastUpdated")
     
+    a2a_endpoint: str = Field(alias="a2aEndpoint")
+    
 class SearchEventArgs(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
     
