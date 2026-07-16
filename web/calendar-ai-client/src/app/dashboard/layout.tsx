@@ -28,7 +28,7 @@ export default async function DashboardLayout({
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar googleAuthenticated={isGoogleAuthenticated} />
-        <main className="flex-1 p-4">{children}</main>
+        <main className="flex-1 p-4 overflow-hidden flex flex-col">{children}</main>
       </div>
       <footer className="bg-gray-800 text-white p-4 text-center">
         &copy; {new Date().getFullYear()} {props.headerTitle}. All rights reserved.

@@ -5,7 +5,7 @@ from poker_agent.agents.manager.models import A2ARequestParams, A2ARequest, A2AR
 import random
 import os
 
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
@@ -83,18 +83,43 @@ def register_remote_agent(agent_name: str, agent_url: str):
                 description=skill.get("description", ""),
                 args_schema=skill.get("inputSchema", {}),
             )
-            tool.invoke({"minDatetime": "2026-06-01T00:00:00Z", "maxDatetime": "2026-07-01T00:00:00Z"})
             tools.append(tool)
         
         return tools
         
     except requests.RequestException as e:
         raise ValueError(f"Failed to fetch agent card from {agent_url}: {e}")
+    
+def fetch_agent_skills(agent_url: str):
+    """
+    Fetches the skills of a remote agent from its agent-card.json.
+
+    Args:
+        agent_url (str): The URL of the remote agent.
+    Returns:
+        list: A list of skills (dictionaries) of the remote agent.
+    Raises:
+        ValueError: If the agent URL is invalid or if fetching the skills fails.
+    """
+    if not agent_url or not isinstance(agent_url, str):
+        raise ValueError("Agent URL must be a non-empty string.")
+
+    try:
+        response = requests.get(f"{agent_url}/.well-known/agent-card.json")
+        response.raise_for_status()
+        agent_card = response.json()
+        skills = agent_card.get("skills", [])
+        
+        return "\n".join([f"Skill: {skill.get('name')} | Description: {skill.get('description')}\n" for skill in skills])
+
+    except requests.RequestException as e:
+        raise ValueError(f"Failed to fetch agent skills from {agent_url}: {e}")
 
     
 if __name__ == "__main__":
     # Example usage
     try:
-        register_remote_agent("Event Search and Planning Agent", "http://localhost:9000")
+        # register_remote_agent("Event Search and Planning Agent", "http://localhost:9000")
+        print(fetch_agent_skills("http://localhost:9000"))
     except ValueError as e:
         logger.exception("Error registering remote agent: %s", e)

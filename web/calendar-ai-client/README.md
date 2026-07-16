@@ -182,3 +182,6 @@ Folder: app/api/auth/google/[[...slug]]/route.js
 /api/auth/google/callback 🟢 Works (slug is ["callback"])
 
 /api/auth/google 🟢 Works (slug is undefined)
+
+## Parse LLM response
+npm install react-markdown

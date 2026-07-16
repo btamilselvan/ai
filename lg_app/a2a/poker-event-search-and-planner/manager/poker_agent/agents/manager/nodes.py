@@ -1,21 +1,19 @@
 from poker_agent.utils.app_state import AppState
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain.chat_models import init_chat_model
 from langchain_mcp_adapters.client import MultiServerMCPClient
 import logging
 from dotenv import load_dotenv
 import asyncio
 from langgraph.prebuilt import ToolNode
-from poker_agent.agents.manager.utils import (
-    ManagerAgentResponse,
-    delegate_to_planner_tool,
-)
-from poker_agent.agents.manager.remote_tool import register_remote_agent
+from poker_agent.agents.manager.remote_tool import register_remote_agent, fetch_agent_skills
+from poker_agent.agents.manager.remote_agent_client import delegate_to_planner_tool
 from typing import Literal
+import json
 
 load_dotenv()
 
-SYSTEM_PROMPT_WITH_PLANNER_AGENT_1 = """
+SYSTEM_PROMPT_WITH_PLANNER_AGENT_2 = """
 
 You are an expert poker travel coordinator and the lead orchestrator of this application. Your goal is to help the user find live poker tournaments in the US and seamlessly integrate them into their personal schedule.
 
@@ -24,14 +22,16 @@ You have access to two distinct resources:
 2. The Planner Agent (Specialist): This is a separate autonomous agent that manages the user's personal calendar, checks for scheduling conflicts, and books slots.
 
 CRITICAL INSTRUCTIONS FOR ROUTING:
-- Whenever the user expresses an intent to attend a tournament, check their availability, or book a date (e.g., "Am I free for this?", "Book the Wynn event", "Add this to my calendar"), you MUST delegate the task to the Planner Agent. You must include a clear message that should be sent to the Planner Agent describing the user's request and the relevant tournament details. The planner agent message should be included as an argument in the `delegate_to_planner` tool call. The argument name should be `task_description`. The Planner Agent will handle all calendar-related tasks, including checking for conflicts and booking.
+- Whenever the user expresses an intent to attend a tournament, check their availability, or book a date (e.g., "Am I free for this?", "Book the Wynn event", "Add this to my calendar"), you MUST delegate the task to the Planner Agent. 
+You must include a clear message that should be sent to the Planner Agent describing the user's request and the relevant tournament details. The planner agent message should be included as an argument in the `delegate_to_planner` tool call. 
+The argument name should be `task_description`. The Planner Agent will handle all calendar-related tasks, including checking for conflicts and booking.
 - To hand off control to the Planner Agent, explicitly state in your internal tracking that the Planner needs to be invoked, or set the execution flow to target the planner.
 - Do not attempt to manage the calendar or resolve time-zone conflicts yourself. You are the poker data and communication expert; the Planner is the calendar domain expert.
 
 Maintain a professional, helpful tone. When the Planner Agent returns its findings (such as conflicts or confirmation), synthesize those results and present them clearly to the user.
 """
 
-SYSTEM_PROMPT_WITH_PLANNER_AGENT = """
+SYSTEM_PROMPT_WITH_PLANNER_AGENT_1 = """
 You are an expert poker travel coordinator and the lead orchestrator of this application. Your goal is to help users find live poker tournaments in the US and seamlessly integrate them into their personal schedules.
 
 To assist the user, you have access to external capabilities that allow you to search for real-time poker data and interact with the user's personal calendar. 
@@ -39,27 +39,56 @@ To assist the user, you have access to external capabilities that allow you to s
 CRITICAL OPERATIONAL RULES:
 1. Data Accuracy: When looking up tournament schedules, buy-ins, locations, and structures, always rely entirely on your external search capabilities. Do not hallucinate, guess, or estimate tournament data.
 2. Calendar & Scheduling Delegation: You are the poker data and communication expert, not a scheduling system. You must never attempt to manually calculate availability, manage calendar slots, or resolve time-zone conflicts yourself. 
-3. Handoff Trigger: Whenever the user wants to check their availability, add an event, or book a tournament (e.g., "Am I free?", "Book this", "Put it on my calendar"), you must immediately invoke the appropriate scheduling capability. You must construct a clear, detailed description of the user's request and the relevant tournament details to pass into that capability.
+3. Handoff Trigger: Whenever the user wants to check their availability, add an event, or book a tournament (e.g., "Am I free?", "Book this", "Put it on my calendar"), you must immediately invoke the appropriate scheduling capability. 
+You must construct a clear, detailed description of the user's request and the relevant tournament details to pass into that capability.
 
 Maintain a professional, helpful tone. When the external systems return data (such as search results, scheduling conflicts, or booking confirmations), synthesize those results and present them clearly and elegantly to the user.
 
 """
 
+SYSTEM_PROMPT_WITH_PLANNER_AGENT = """
+You are an expert poker travel coordinator and the lead orchestrator of this application. Your goal is to help the user find live poker tournaments in the US and seamlessly integrate them into their personal schedule.
+
+You have access to two distinct resources:
+1. `poker tournament search` (MCP Tool): You must use this to look up tournament schedules, buy-ins, locations, and structures. Do not hallucinate or guess data.
+2. The Planner Agent (Specialist): This is a separate autonomous agent that manages the user's personal calendar, checks for scheduling conflicts, and books slots.
+
+CRITICAL INSTRUCTIONS FOR ROUTING:
+- **INFORMATIONAL ONLY:** If the user is strictly asking for general tournament information, lists, or dates (e.g., "What games are on July 15th?"), call the `poker tournament search` tool and reply to the user directly. DO NOT invoke the Planner Agent.
+
+- **AVAILABILITY & ACTIONS:** Whenever the user expresses an intent to attend a tournament, check their availability, or book a date (e.g., "Am I free for this?", "Book the Wynn event", "Add this to my calendar"), you MUST delegate the task to the Planner Agent. 
+
+- **DELEGATION STRUCTURE:** You must include a clear, imperative instruction string that will be sent to the Planner Agent describing the user's request and the relevant tournament details. You must pass this instruction inside the `task_description` argument of the `delegate_to_planner` tool call. 
+  **CRITICAL: The `task_description` text must bypass conversational filler and begin immediately with the prefix 'SYSTEM INSTRUCTION FOR PLANNER:'. State the tournament parameters and the exact operation (evaluate conflict or write event) the Planner must perform.**
+  **CRITICAL: The SYSTEM INSTRUCTION FOR PLANNER must not mention anything about the poker tournament data at all.**
+  
+  Here are the capabilities of the Planner Agent:
+  {planner_agent_capabilities}
+
+- Do not attempt to manage the calendar or resolve time-zone conflicts yourself. You are the poker data and communication expert; the Planner is the calendar domain expert.
+
+Maintain a professional, helpful tone. When the Planner Agent returns its findings (such as conflicts or confirmation), synthesize those results and present them clearly to the user.
+"""
 
 
-def configure_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] [%(filename)s: %(lineno)d] [Thread-%(thread)d] %(message)s",
-        handlers=[logging.StreamHandler()],
-    )
-    return logging.getLogger(__name__)
+# def configure_logging():
+#     logging.basicConfig(
+#         level=logging.INFO,
+#         format="%(asctime)s [%(levelname)s] [%(filename)s: %(lineno)d] [Thread-%(thread)d] %(message)s",
+#         handlers=[logging.StreamHandler()],
+#     )
+#     return logging.getLogger(__name__)
+
+
+# configure_logging()
+logger = logging.getLogger(__name__)
 
 
 async def configure_model_and_tools():
     model = init_chat_model(
         "gemma4:e4b", temperature=0, max_tokens=2048, model_provider="ollama"
     )
+    global mcp_client
     mcp_client = MultiServerMCPClient(
         {
             "poker_scout_mcp": {
@@ -68,35 +97,54 @@ async def configure_model_and_tools():
             }
         }
     )
-    
-    planner_agent_tools = register_remote_agent("Planner Agent", "http://localhost:9000")
-    
+
+    # planner_agent_tools = register_remote_agent("Planner Agent", "http://localhost:9000")
+
     tools = await mcp_client.get_tools(server_name="poker_scout_mcp")
     # filter non poker agent search tools
-    tools = [tool for tool in tools if "poker_agent" in tool.name] + planner_agent_tools
+    # tools = [tool for tool in tools if "poker_agent" in tool.name] + planner_agent_tools
+
+    tools = [tool for tool in tools if "poker_agent" in tool.name]
+    global tool_registry
+    tool_registry = {tool.name: tool for tool in tools}
+
+    global planner_agent_skills
+    planner_agent_skills = fetch_agent_skills("http://localhost:9000")
 
     global tool_node
     tool_node = ToolNode(tools)
 
-    logger.info(f"Retrieved tools for poker_scout_mcp: {tools}")
+    # logger.info(f"Retrieved tools for poker_scout_mcp: {tools}")
     model_with_tools = model.bind_tools(tools)
     return model_with_tools
 
 
-configure_logging()
-logger = logging.getLogger(__name__)
-
-model_with_tools = asyncio.run(configure_model_and_tools())
+model_with_tools = None
+planner_agent_skills = None
+tool_node = None
 model = init_chat_model(
     "gemma4:e4b", temperature=0, max_tokens=2048, model_provider="ollama"
 )
 
 
-def llm_node(app_state: AppState) -> AppState:
+async def ensure_initialized():
+    global model_with_tools
+    if model_with_tools is None:
+        model_with_tools = await configure_model_and_tools()
+
+
+async def llm_node(app_state: AppState) -> AppState:
     """This node calls the LLM with the current messages and updates the state with the response."""
+    await ensure_initialized()
+
+    updated_system_prompt = SYSTEM_PROMPT_WITH_PLANNER_AGENT.format(
+        planner_agent_capabilities=planner_agent_skills
+    )
+
+    # logger.info(f"Invoking LLM with system prompt: {updated_system_prompt}")
 
     manager_response = model_with_tools.invoke(
-        [SYSTEM_PROMPT_WITH_PLANNER_AGENT] + app_state.messages
+        [updated_system_prompt] + app_state.messages
     )
 
     # manager_response = model.with_structured_output(ManagerAgentResponse).invoke(
@@ -121,19 +169,25 @@ def conditional_node(app_state: AppState) -> Literal["tools", "planner", "END"]:
 
     if not ai_message.tool_calls:
         return "END"
-    
-    return "tools"
 
-    # if ai_message.tool_calls[0]["name"] == "delegate_to_planner":
-    #     logger.info(
-    #         "Planner delegation tool call found. Routing to planner node for planner delegation."
-    #     )
-    #     return "planner"
-    # else:
-    #     logger.info(
-    #         "Tool calls found, but not for planner delegation. Routing to tools node."
-    #     )
-    #     return "tools"
+    # return "tools"
+
+    # Extract all tool names from the current message
+    tool_names = [tool_call["name"] for tool_call in ai_message.tool_calls]
+
+    # 1. Prioritize regular tools first
+    has_regular_tools = any(
+        name != "delegate_to_planner" for name in tool_names)
+    if has_regular_tools:
+        logger.info("Regular tool calls found. Routing to tools node.")
+        return "tools"
+
+    # 2. If ONLY planner delegation is left (or it's the second iteration), route to planner
+    if "delegate_to_planner" in tool_names:
+        logger.info("Planner delegation found. Routing to planner node.")
+        return "planner"
+
+    return "END"
 
 
 async def tool_node_wrapper(app_state: AppState):
@@ -151,26 +205,95 @@ async def tool_node_wrapper(app_state: AppState):
     return result
 
 
-async def planner_node(app_state: AppState):
+async def _invoke_tool(executable_tool, tool_name, tool_id, tool_args):
 
-    logger.info(f"Executing planner node with last message: {app_state.messages[-1]}")
+    try:
+        tool_result = await executable_tool.ainvoke(tool_args)
+        tool_message = ToolMessage(
+            content=tool_result,
+            name=tool_name,
+            tool_call_id=tool_id
+        )
+        logger.info(f"Tool {tool_name} result: {tool_result}")
+        return tool_message
+    except Exception as e:
+        logger.exception("Error executing tool %s", executable_tool.name)
+        tool_message = ToolMessage(
+            content=f"Error executing tool {tool_name}: {str(e)}",
+            name=tool_name,
+            tool_call_id=tool_id,
+            error=True
+        )
+        return tool_message
+
+
+async def custom_tool_node(app_state: AppState):
+    
+    """ this is useful when there are mulitple tool_calls (one via mcp and another via a2a) to make to fullfill a request. In such cases, we cannot use 
+    prebuilt tool node as a2a calls need to be handled separately"""
+
+    ai_message: AIMessage = app_state.messages[-1]
+
+    if not ai_message.tool_calls:
+        return "END"
+
+    tool_messages = []
+    for tool_call in ai_message.tool_calls:
+        tool_name = tool_call["name"]
+        tool_id = tool_call["id"]
+        tool_args = tool_call["args"]
+        
+        logger.info(
+            f"Executing tool {tool_name} with args {tool_args} and id {tool_id}")
+
+        if tool_name in tool_registry:
+            tool_message = await _invoke_tool(
+                tool_registry[tool_name], tool_name, tool_id, tool_args)
+            tool_messages.append(tool_message)
+
+        elif tool_name == "delegate_to_planner":
+            tool_message = ToolMessage(
+                content="Delegation request acknowledged. Transitioning to planner.",
+                name=tool_name,
+                tool_call_id=tool_id
+            )
+            tool_messages.append(tool_message)
+
+    return AppState(messages=tool_messages)
+
+
+def planner_node(app_state: AppState):
+
+    logger.info(
+        f"Executing planner node with last message: {app_state.messages[-1]}")
 
     # retrieve the tool call arguments for delegation to planner from the last message
     ai_message: AIMessage = app_state.messages[-1]
+
     if (
         not ai_message.tool_calls
         or ai_message.tool_calls[0]["name"] != "delegate_to_planner"
     ):
-        logger.error("No planner delegation tool call found in the last message.")
+        logger.error(
+            "No planner delegation tool call found in the last message.")
         return app_state
 
-    task_description = ai_message.tool_calls[0]["args"].get("task_description", None)
+    task_description = ai_message.tool_calls[0]["args"].get(
+        "task_description", None)
     if not task_description:
         logger.error(
             "No task description found in the tool call arguments for planner delegation."
         )
         return app_state
 
-    logger.info(f"Delegating to planner with task description: {task_description}")
+    logger.info(
+        f"Delegating to planner with task description: {task_description}")
+    # construct A2ARequest and send to planner agent
+    agent_response = delegate_to_planner_tool(task_description, app_state)
 
-    return app_state
+    system_message = SystemMessage(
+        content=task_description)
+
+    planner_ai_message = AIMessage(content=agent_response)
+
+    return AppState(messages=[system_message, planner_ai_message])

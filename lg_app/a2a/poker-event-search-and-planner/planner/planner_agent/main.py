@@ -60,11 +60,11 @@ async def build_graph(redis_client: redis.Redis):
     graph.add_edge(START, "llm_node")
     graph.add_conditional_edges("llm_node", tools_condition)
     graph.add_edge("tools", "llm_node")
-    global app
-    app = graph.compile()
-    logger.info(app.get_graph().draw_ascii())
+    global lgapp
+    lgapp = graph.compile()
+    logger.info(lgapp.get_graph().draw_ascii())
 
-    return app
+    return lgapp
 
 
 async def lifespan(app: FastAPI):
@@ -193,7 +193,7 @@ def chat(
 
     # update app state
     # invoke LLM
-    new_state = app.invoke(
+    new_state = lgapp.invoke(
         AppState(messages=messages, thread_id=body.thread_id, email=body.email)
     )
     # logger.info("response from llm %s, type %s", new_state, type(new_state))
@@ -251,8 +251,8 @@ def agent_card():
         skills=[
             AgentSkill(
                 name="Search Events",
-                id="search_events",
-                description="Search for available events based on date range",
+                id="search_calendar_events",
+                description="Search Google Calendar events within a specified date and time range.",
                 input_schema=InputSchema(
                     type="object",
                     properties={
@@ -260,6 +260,16 @@ def agent_card():
                         "maxDatetime": {"type": "string", "format": "date-time", "description": "The ending ISO 8601 date-time filter (e.g., 2026-07-01T00:00:00Z)"},
                     },
                     required=["minDatetime", "maxDatetime"]
+                )
+            ),
+            AgentSkill(
+                name="get_current_datetime",
+                id="get_current_datetime",
+                description="Get the current datetime according to the user's Google Calendar timezone",
+                input_schema=InputSchema(
+                    type="object",
+                    properties={},
+                    required=[]
                 )
             )
         ],
@@ -283,7 +293,7 @@ def a2a_message_stream_handler(request: Request, response: Response):
     """Handle A2A message stream requests"""
     logger.info("A2A message stream request received %s", request)
 
-@app.post("/a2a", summary="Handle A2A RPC requests")
+@app.post("/tools", summary="Handle A2A RPC requests")
 def a2a_rpc_handler(request: A2ARequest, r: redis.Redis = Depends(get_redis_client)):
     """Handle A2A RPC requests"""
     logger.info("A2A RPC request received %s", request)
@@ -314,12 +324,82 @@ def a2a_rpc_handler(request: A2ARequest, r: redis.Redis = Depends(get_redis_clie
                 contextId=context_id
             )
         )
+    elif request.params.skill == "get_current_datetime":
+        logger.info("Handling get_current_datetime skill with arguments: %s", request.params.arguments)
+        
+        context_id = request.params.contextId if request.params.contextId else ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
+        
+        email = request.params.arguments.get("email")
+        
+        current_datetime = google_calendar_datetime(email, r)
+        
+        return A2AResponse(
+            jsonrpc="2.0",
+            id=request.id,
+            result=A2AResponseResult(
+                output={"data": current_datetime},
+                contextId=context_id
+            )
+        )
+    else:
+        logger.warning("Unknown skill requested: %s", request.params.skill)
+        return A2AResponse(
+            jsonrpc="2.0",
+            id=request.id,
+            result=A2AResponseResult(
+                output={"data": f"Unknown skill: {request.params.skill}"},
+                contextId=None
+            )
+        )   
     
-    return A2AResponse(
+@app.post("/a2a", summary="Handle A2A RPC requests")
+def a2a_rpc_handler(a2a_request: A2ARequest, http_request: Request, r: redis.Redis = Depends(get_redis_client)):
+    """Handle A2A RPC requests"""
+    logger.info("A2A RPC request received %s", a2a_request)
+    
+    thread_id = a2a_request.params.message.contextId
+    # get email from http_request headers
+    email = http_request.headers.get("x-user-email")
+    
+    # retrieve app state for the email and thread id (conextId is used as thread_id)
+    current_state: AppState = get_appstate(email, thread_id, r)
+    # logger.info("retrieved app state %s", current_state)
+    history = current_state.messages or []
+    # add current user message to the history
+    messages = history + [HumanMessage(content=a2a_request.params.message.parts[0].get("text"))]
+
+    # update app state
+    # invoke LLM
+    new_state = lgapp.invoke(
+        AppState(messages=messages, thread_id=thread_id, email=email)
+    )
+    # logger.info("response from llm %s, type %s", new_state, type(new_state))
+
+    # persist app state back to redis
+    save_appstate(new_state, r)
+    
+    # persist conversation history as well
+
+    logger.info("final response %s", new_state["messages"][-1].content)
+    
+    # construct A2AResponse
+    a2a_response = A2AResponse(
         jsonrpc="2.0",
-        id="request_1234",
+        id=a2a_request.id,
         result=A2AResponseResult(
-            output={"data": []},
-            contextId=None
+            contextId=thread_id,
+            artifacts=[
+                {
+                    "parts": [
+                        {
+                            "kind": "text",
+                            "text": new_state["messages"][-1].content
+                        }
+                    ]
+                }
+            ],
+            status="success"
         )
     )
+    
+    return a2a_response

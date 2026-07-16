@@ -48,4 +48,4 @@ async def create_graph():
     logger.info(agent.get_graph().draw_ascii())
     return agent
 
-agent = asyncio.run(create_graph())
+agent = create_graph()

@@ -1,5 +1,5 @@
 import redis
-from planner_agent.util.app_state import AppState
+from poker_agent.utils.app_state import AppState
 import logging
 import json
 
@@ -8,9 +8,9 @@ logger = logging.getLogger(__name__)
 
 def get_appstate(email, thread_id, r: redis.Redis):
     """retrieve app state for the given email and thread_id or create one if does not exist"""
-    app_state = r.json().get(f"planner:{email}:{thread_id}")
+    app_state = r.json().get(f"manager:{email}:{thread_id}")
 
-    logger.info(
+    logger.debug(
         "retrieved app state %s, thread %s email %s", app_state, thread_id, email
     )
 
@@ -24,6 +24,6 @@ def save_appstate(state: dict, r):
     appstate = AppState(**state)
 
     r.json().set(
-        f"planner:{appstate.email}:{appstate.thread_id}", "$", appstate.model_dump_json()
+        f"manager:{appstate.email}:{appstate.thread_id}", "$", appstate.model_dump_json()
     )
     # logger.info("app state saved to redis %s", appstate)

@@ -33,9 +33,11 @@ export default function RecipeAIBot() {
     }
 
     return (
-        <div>
-            <h1>Calendar AI Bot</h1>
-            <ChatBot sendFunc={chatWithAI} availableConversations={availableConversations} />
+        <div className="flex flex-col h-full">
+            <h1 className="mb-2">Calendar AI Bot</h1>
+            <div className="flex-1 min-h-0">
+                <ChatBot sendFunc={chatWithAI} availableConversations={availableConversations} />
+            </div>
         </div>
     )
 }
