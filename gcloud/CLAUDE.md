@@ -43,7 +43,12 @@ Source is organized by domain into subpackages; `api.py`, `config.py`, `models.p
   - `POST /telegram-webhook` — the Telegram bot's webhook target; forwards `callback_query` updates (Delete/Keep button presses) to `triage.mail_triage.handle_telegram_callback`.
   - `POST /gmail/renew-watch` — on-demand trigger for `gmail.auth.renew_watch()`, for manually forcing a renewal outside the weekly schedule. Returns `{status, historyId, expiration}` on success or `502` on failure (does not send a Telegram alert — the caller already gets the failure directly in the response, unlike the scheduled job below).
   - An APScheduler `BackgroundScheduler`, started via the app's `lifespan`, runs two cron jobs: `triage.mail_triage.send_daily_summary` daily at `config.DAILY_SUMMARY_TIME`, and `_renew_gmail_watch` (wraps `gmail.auth.renew_watch`) weekly at `config.GMAIL_WATCH_RENEWAL_DAY`/`GMAIL_WATCH_RENEWAL_TIME` (default Saturday 11:00) — well within the ~7-day expiry window, so a missed run is harmless. `_renew_gmail_watch` sends a Telegram alert if renewal fails (`renew_watch` returning `None`), since a lapsed watch means new mail silently stops triggering `/webhook`.
-- **`config.py`** — all environment-driven settings (Ollama, Redis, Telegram, digest time), loaded via `python-dotenv` from a local `.env`.
+  - Every route except `GET /health` is protected via a `dependencies=[Depends(...)]` on the route decorator, pointing at `security.py` (see below) — each route's caller has a different trust model, so each gets a different check.
+- **`security.py`** — FastAPI auth dependencies, one per protected route, each raising `HTTPException(401)` on failure:
+  - `require_api_key` — guards `POST /gmail/renew-watch`. Compares the `X-API-Key` header to `config.API_KEY` via `secrets.compare_digest`.
+  - `verify_telegram_secret` — guards `POST /telegram-webhook`. Compares the `X-Telegram-Bot-Api-Secret-Token` header (which Telegram echoes on every push once a `secret_token` is set via `setWebhook`) to `config.TELEGRAM_WEBHOOK_SECRET`.
+  - `verify_pubsub_oidc_token` — guards `POST /webhook`. Verifies the `Authorization: Bearer <token>` header is a Google-signed OIDC token (`google.oauth2.id_token.verify_oauth2_token`, which checks signature/expiry/issuer against Google's public certs) with audience `config.PUBSUB_OIDC_AUDIENCE`, then additionally checks the token's `email` claim matches `config.PUBSUB_OIDC_SERVICE_ACCOUNT_EMAIL` — audience alone isn't enough to pin the token to *our* specific push subscription's service account. Requires the Pub/Sub push subscription to be configured with that service account (see Setup dependencies below).
+- **`config.py`** — all environment-driven settings (Ollama, Redis, Telegram, digest time, auth secrets), loaded via `python-dotenv` from a local `.env`.
 - **`models.py`** — `MailMessage` pydantic model (message_id, subject, sender, body, received_on).
 - **`scripts/create_pubsub_watch.py`** (was `main.py`) — standalone script for one-off Pub/Sub topic creation + Gmail `watch()` registration (duplicates logic also present in `gmail/auth.py`); not imported by the API.
 - **`exceptions.py`** — defines `InvalidCredentials`.
@@ -53,13 +58,14 @@ Source is organized by domain into subpackages; `api.py`, `config.py`, `models.p
 This service depends on external configuration that isn't part of the code:
 1. A GCP project (`trocks-ai-gmail`) with the Gmail API and Pub/Sub API enabled.
 2. A Pub/Sub topic (`trocks-ai-gmail-topic`) with Gmail granted publish rights.
-3. A push subscription pointing at a publicly reachable HTTPS URL for `POST /webhook` (a tunnel like zrok is used for local dev).
+3. A push subscription pointing at a publicly reachable HTTPS URL for `POST /webhook` (a tunnel like zrok is used for local dev), configured with a dedicated service account (`--push-auth-service-account`) so `security.py`'s `verify_pubsub_oidc_token` can validate incoming requests — `PUBSUB_OIDC_AUDIENCE`/`PUBSUB_OIDC_SERVICE_ACCOUNT_EMAIL` in `.env` must match.
 4. OAuth setup: `credentials.json` (OAuth client secrets) is used once by `gmail/auth.py`'s `_complete_oauth_workflow()` to produce `token.json`, which the running API then relies on via `get_credentials()`.
 5. Gmail's `watch()` must be re-invoked periodically (it expires ~7 days) to keep push notifications flowing — handled automatically by the weekly `_renew_gmail_watch` job in `api.py` once the service is running (default Saturday 11:00); `POST /gmail/renew-watch` can also trigger it on demand, and `gmail/auth.py`'s `__main__` block can be run manually if needed.
 6. A local Ollama server with `gemma4:e4b` pulled (`ollama pull gemma4:e4b`), reachable at `OLLAMA_HOST`.
 7. A running Redis instance, reachable at `REDIS_HOST`/`REDIS_PORT`.
-8. A Telegram bot (`TELEGRAM_BOT_TOKEN`) with its webhook registered once against the same public tunnel: `https://api.telegram.org/bot<TOKEN>/setWebhook?url=<PUBLIC_URL>/telegram-webhook`. `TELEGRAM_CHAT_ID` is the chat the bot sends confirmations/digests to.
-9. A `.env` file (gitignored) supplying the env vars consumed by `config.py`.
+8. A Telegram bot (`TELEGRAM_BOT_TOKEN`) with its webhook registered once against the same public tunnel, including a `secret_token` so `security.py`'s `verify_telegram_secret` can validate incoming requests: `https://api.telegram.org/bot<TOKEN>/setWebhook?url=<PUBLIC_URL>/telegram-webhook&secret_token=<TELEGRAM_WEBHOOK_SECRET>`. `TELEGRAM_CHAT_ID` is the chat the bot sends confirmations/digests to.
+9. A self-chosen `API_KEY` for `security.py`'s `require_api_key`, sent as `X-API-Key` on manual calls to `POST /gmail/renew-watch`.
+10. A `.env` file (gitignored) supplying the env vars consumed by `config.py`.
 
 `credentials.json`, `token.json`, and `.env` are gitignored — never commit them.
 

@@ -6,13 +6,20 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api
+import security
 from models import MailMessage
 
 
 @pytest.fixture
 def client():
+    # These tests exercise business logic, not auth -- auth itself is covered
+    # separately in tests/test_security.py.
+    api.app.dependency_overrides[security.require_api_key] = lambda: None
+    api.app.dependency_overrides[security.verify_pubsub_oidc_token] = lambda: None
+    api.app.dependency_overrides[security.verify_telegram_secret] = lambda: None
     with TestClient(api.app) as c:
         yield c
+    api.app.dependency_overrides.clear()
 
 
 def _pubsub_payload(data: dict | None = None, raw_data: str | None = None) -> dict:

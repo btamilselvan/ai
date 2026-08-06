@@ -19,3 +19,9 @@ DAILY_SUMMARY_TIME = os.environ.get("DAILY_SUMMARY_TIME", "21:00")
 # that window) is enough, so this runs on a fixed day+time rather than daily.
 GMAIL_WATCH_RENEWAL_DAY = os.environ.get("GMAIL_WATCH_RENEWAL_DAY", "sat")
 GMAIL_WATCH_RENEWAL_TIME = os.environ.get("GMAIL_WATCH_RENEWAL_TIME", "11:00")
+
+# Auth for the endpoints in security.py -- see that module for how each is used.
+API_KEY = os.environ.get("API_KEY")
+TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+PUBSUB_OIDC_AUDIENCE = os.environ.get("PUBSUB_OIDC_AUDIENCE")
+PUBSUB_OIDC_SERVICE_ACCOUNT_EMAIL = os.environ.get("PUBSUB_OIDC_SERVICE_ACCOUNT_EMAIL")

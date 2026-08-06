@@ -12,10 +12,11 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, status, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status, Request
 from pydantic import BaseModel
 
 import config
+import security
 from gmail.auth import fetch_mails, renew_watch
 from telegram import bot as telegram_bot
 from triage import mail_triage
@@ -61,9 +62,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Change this to a long, secure passphrase of your choice
-MY_SECRET_TOKEN = "YOUR_CHOSEN_SECRET_PASSPHRASE"
-
 
 # Define the expected Google Pub/Sub request schema
 class PubSubMessage(BaseModel):
@@ -83,7 +81,7 @@ async def health_check():
     return {"status": "ok"}
 
 
-@app.post("/gmail/renew-watch")
+@app.post("/gmail/renew-watch", dependencies=[Depends(security.require_api_key)])
 async def gmail_renew_watch():
     response = renew_watch()
     if response is None:
@@ -106,22 +104,15 @@ def _fetch_and_triage(history_id: str) -> None:
         logger.exception("❌ Error triaging mail for historyId %s: %s", history_id, e)
 
 
-@app.post("/webhook")
+@app.post("/webhook", dependencies=[Depends(security.verify_pubsub_oidc_token)])
 async def gmail_webhook(payload: PubSubPayload, background_tasks: BackgroundTasks):
-    # 1. Verify the secret token matches
-    # if token != MY_SECRET_TOKEN:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_401_UNAUTHORIZED,
-    #         detail="Unauthorized request source"
-    #     )
-
     try:
-        # 2. Decode the base64 data envelope from Google
+        # 1. Decode the base64 data envelope from Google
         base64_data = payload.message.data
         decoded_bytes = base64.b64decode(base64_data)
         decoded_str = decoded_bytes.decode("utf-8")
 
-        # 3. Parse the JSON inside the payload
+        # 2. Parse the JSON inside the payload
         gmail_event = json.loads(decoded_str)
 
         # This will contain 'emailAddress' and 'historyId'
@@ -131,11 +122,11 @@ async def gmail_webhook(payload: PubSubPayload, background_tasks: BackgroundTask
             gmail_event["historyId"],
         )
 
-        # 4. Fetch + classify mail in the background so Pub/Sub gets acked
+        # 3. Fetch + classify mail in the background so Pub/Sub gets acked
         # immediately instead of waiting on Gmail/LLM/Telegram round-trips.
         background_tasks.add_task(_fetch_and_triage, gmail_event["historyId"])
 
-        # 5. Return 200 OK so Google acknowledges successful receipt
+        # 4. Return 200 OK so Google acknowledges successful receipt
         return {"status": "success"}
 
     except Exception as e:
@@ -146,7 +137,7 @@ async def gmail_webhook(payload: PubSubPayload, background_tasks: BackgroundTask
         )
 
 
-@app.post("/telegram-webhook")
+@app.post("/telegram-webhook", dependencies=[Depends(security.verify_telegram_secret)])
 async def telegram_webhook(request: Request):
     update = await request.json()
     callback_query = update.get("callback_query")
